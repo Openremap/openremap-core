@@ -1,0 +1,36 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/openremap"]
+
+[tool.uv]
+package = true
+
+[project]
+name = "openremap"
+version = "0.1.0"
+description = "ECU binary analysis and patching toolkit — diff, validate, and apply tuning recipes to automotive ECU binaries."
+readme = "README.md"
+license = { file = "LICENSE" }
+requires-python = ">=3.14"
+dependencies = [
+    "typer>=0.15.0",
+    "rarfile>=4.2",
+]
+
+[project.scripts]
+openremap = "openremap.cli.main:app"
+
+[project.urls]
+Homepage = "https://github.com/gbelectronics/openremap"
+Repository = "https://github.com/gbelectronics/openremap"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
