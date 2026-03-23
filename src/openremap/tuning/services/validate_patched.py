@@ -1,6 +1,6 @@
 """
-ECU Patched Validator — API service
-=====================================
+ECU Patched Validator
+======================
 Post-patch verification service. After the patcher has produced a patched
 binary, this service reads the patched bytes and confirms that every
 instruction in the recipe now has its modified bytes (mb) present at the
@@ -10,8 +10,8 @@ Mirror image of ecu_validate_strict:
     ECUStrictValidator   → checks ob at each offset  (before patching)
     ECUPatchedValidator  → checks mb at each offset  (after patching)
 
-Operates entirely on in-memory bytes — no file I/O, no CLI.
-Designed to be called from the FastAPI router.
+Operates entirely on in-memory bytes — no file I/O.
+Can be used from the CLI, the API layer, or any other caller.
 
 Rules:
 - Scans ALL instructions before reporting (never aborts early).

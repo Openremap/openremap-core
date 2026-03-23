@@ -1,5 +1,5 @@
 """
-Pydantic schemas for the ECU patcher endpoints.
+Pydantic schemas for the ECU patcher.
 """
 
 from typing import List, Optional

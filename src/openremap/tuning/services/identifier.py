@@ -7,11 +7,11 @@ and delegating to the first extractor that claims the binary.
 Falls back to a generic response (unknown manufacturer) when no extractor
 matches.
 
-Returns only the lean identity fields used by the live API:
+Returns the lean identity fields:
     manufacturer, match_key, ecu_family, ecu_variant,
     software_version, hardware_number, calibration_id, file_size, sha256 (full file).
 
-Full rich-extraction logic is preserved cold in src/legacy/analyzer/.
+Full rich-extraction logic is preserved cold in the legacy/ reference folder.
 """
 
 import hashlib

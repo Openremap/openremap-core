@@ -12,7 +12,7 @@ Every part of the codebase that matters for contributors is covered below.
 
 ### No Binary Distribution
 
-Never upload, attach, or link to ECU binary files (`.bin`, `.ori`, `.kp`, `.ols`) in pull requests, issues, or any other part of this repository. ECU firmware is proprietary intellectual property. The only binary in this repo is `public/original.bin`, which exists solely as a controlled test artifact.
+Never upload, attach, or link to ECU binary files (`.bin`, `.ori`, `.kp`, `.ols`) in pull requests, issues, or any other part of this repository. ECU firmware is proprietary intellectual property. Do not add any binary files to this repository.
 
 ### Original Heuristics Only
 
@@ -60,7 +60,7 @@ Any output produced by this tool — recipes, patched binaries, or identificatio
 |---|---|
 | **New extractor** | Add support for Siemens SID, Delphi DCM, Marelli MJD, Denso, Continental |
 | **Improve an existing extractor** | Fix a wrong pattern, handle an edge-case variant, improve the match key |
-| **Bug fix** | Fix a crash, a wrong API response, a validation logic error |
+| **Bug fix** | Fix a crash, a wrong identification result, a validation logic error |
 | **Tests** | Write `pytest` tests for any extractor or service |
 | **Documentation** | Improve the README, add docstrings, fix typos |
 | **Recipe format** | Propose and implement improvements to the recipe JSON structure |
@@ -73,28 +73,22 @@ Any output produced by this tool — recipes, patched binaries, or identificatio
 
 - Python 3.14+
 - [uv](https://github.com/astral-sh/uv)
-- A running MongoDB instance (local or remote)
-- *(Optional)* Redis
 
 ### Steps
 
 ```bash
 # 1. Fork the repo on GitHub, then clone your fork
-git clone https://github.com/your-username/ecu-patch-api.git
-cd ecu-patch-api/api
+git clone https://github.com/your-username/openremap.git
+cd openremap
 
 # 2. Install all dependencies
 uv sync
 
-# 3. Create your .env file
-cp .env.example .env
-# Edit .env and fill in at least MONGO_URL
-
-# 4. Start the development server
-uv run uvicorn main:app --reload --port 8000
+# 3. Run the test suite to confirm everything works
+uv run pytest
 ```
 
-The interactive API docs will be at `http://localhost:8000/docs`. You can test every endpoint directly from there.
+That's all that is needed to work on the engine and CLI. No server, no database, no environment file required.
 
 ---
 
@@ -104,16 +98,16 @@ This is the single most impactful thing you can contribute. The entire pipeline 
 
 ### How the extractor system works
 
-Every extractor lives in `src/tuning/manufacturers/<brand>/<family>/extractor.py` and subclasses `BaseManufacturerExtractor`. When a binary is submitted, the registry calls `can_handle()` on each extractor in priority order and delegates all extraction to the first one that returns `True`.
+Every extractor lives in `src/openremap/tuning/manufacturers/<brand>/<family>/extractor.py` and subclasses `BaseManufacturerExtractor`. When a binary is submitted, the registry calls `can_handle()` on each extractor in priority order and delegates all extraction to the first one that returns `True`.
 
-The base class (`src/tuning/manufacturers/base.py`) is well-documented. Read it before you start — it explains `can_handle()`, `extract()`, `build_match_key()`, and the opt-in fallback mechanism in detail.
+The base class (`src/openremap/tuning/manufacturers/base.py`) is well-documented. Read it before you start — it explains `can_handle()`, `extract()`, `build_match_key()`, and the opt-in fallback mechanism in detail.
 
 ### Step-by-step guide
 
 **1. Create the package directory**
 
 ```
-src/tuning/manufacturers/<brand>/<family>/
+src/openremap/tuning/manufacturers/<brand>/<family>/
 ├── __init__.py      (empty)
 ├── extractor.py     (your implementation)
 └── patterns.py      (regex patterns and search regions — optional but recommended)
@@ -121,13 +115,13 @@ src/tuning/manufacturers/<brand>/<family>/
 
 For example, a Siemens SID206 extractor would live at:
 ```
-src/tuning/manufacturers/siemens/sid206/extractor.py
+src/openremap/tuning/manufacturers/siemens/sid206/extractor.py
 ```
 
 **2. Implement the extractor**
 
 ```python
-from src.tuning.manufacturers.base import BaseManufacturerExtractor
+from openremap.tuning.manufacturers.base import BaseManufacturerExtractor
 from typing import Dict, List
 
 class SiemensSID206Extractor(BaseManufacturerExtractor):
@@ -171,13 +165,13 @@ class SiemensSID206Extractor(BaseManufacturerExtractor):
 
 **3. Register your extractor in the brand `__init__.py`**
 
-If the brand already exists (e.g. Bosch), open `src/tuning/manufacturers/bosch/__init__.py` and add your extractor to the `EXTRACTORS` list in the correct priority position (most specific first).
+If the brand already exists (e.g. Bosch), open `src/openremap/tuning/manufacturers/bosch/__init__.py` and add your extractor to the `EXTRACTORS` list in the correct priority position (most specific first).
 
-If it is a new brand, create `src/tuning/manufacturers/<brand>/__init__.py`:
+If it is a new brand, create `src/openremap/tuning/manufacturers/<brand>/__init__.py`:
 
 ```python
-from src.tuning.manufacturers.siemens.sid206.extractor import SiemensSID206Extractor
-from src.tuning.manufacturers.base import BaseManufacturerExtractor
+from openremap.tuning.manufacturers.siemens.sid206.extractor import SiemensSID206Extractor
+from openremap.tuning.manufacturers.base import BaseManufacturerExtractor
 
 EXTRACTORS: list[BaseManufacturerExtractor] = [
     SiemensSID206Extractor(),
@@ -186,10 +180,10 @@ EXTRACTORS: list[BaseManufacturerExtractor] = [
 
 **4. Register the brand in the top-level registry**
 
-Open `src/tuning/manufacturers/__init__.py` and add your brand:
+Open `src/openremap/tuning/manufacturers/__init__.py` and add your brand:
 
 ```python
-from src.tuning.manufacturers import bosch, siemens  # add your brand here
+from openremap.tuning.manufacturers import bosch, siemens  # add your brand here
 
 EXTRACTORS: list[BaseManufacturerExtractor] = [
     *bosch.EXTRACTORS,
@@ -199,11 +193,21 @@ EXTRACTORS: list[BaseManufacturerExtractor] = [
 
 **5. Verify it works**
 
-Hit the `/api/v1/tuning/identify` endpoint with a binary of the target family and confirm you get back the correct `manufacturer`, `ecu_family`, and `match_key`. Then try `/api/v1/tuning/analyze` with a stock and a modified binary — if the recipe comes back with the correct `ecu` block, you are done.
+Run the CLI against a binary of the target family and confirm the correct `manufacturer`, `ecu_family`, and `match_key` come back:
+
+```bash
+uv run openremap identify your_binary.bin
+```
+
+Then cook a recipe from a stock and a modified binary to verify the `ecu` block is populated correctly:
+
+```bash
+uv run openremap cook stock.bin modified.bin --output recipe.json
+```
 
 ### Tips for writing a good `can_handle()`
 
-- **Keep it fast.** `can_handle()` is called on every uploaded binary for every registered extractor.  Scan bounded regions (`data[:0x10000]`) rather than the full file where possible.
+- **Keep it fast.** `can_handle()` is called on every uploaded binary for every registered extractor. Scan bounded regions (`data[:0x10000]`) rather than the full file where possible.
 - **Be exclusive, not just inclusive.** If your family shares signatures with another (e.g. both have a `b"Bosch"` string), add explicit guards to reject the other family's binaries. Look at `BoschExtractor.can_handle()` for a worked example of layered exclusion guards.
 - **File size is a strong discriminator.** Many older ECU families have a fixed, known file size (32 KB, 64 KB, 256 KB, etc.). Use it as a fast pre-filter.
 
@@ -224,22 +228,23 @@ If an extractor identifies a binary incorrectly (wrong family, wrong software ve
 
 ### Writing tests
 
-There are no formal tests yet — adding `pytest` coverage is a very welcome contribution. Good test targets:
+Tests live in `tests/` and are run with `uv run pytest`. Good test targets:
 
 - `ECUStrictValidator` — feed it a recipe and a matching vs. non-matching binary and assert the warnings and summary.
 - `ECUDiffAnalyzer` — feed it two known binaries and assert the instruction count and a few specific offsets.
 - Individual extractor `can_handle()` — assert it returns `True` for correct family bytes and `False` for bytes from other families.
 
-Create tests in a `tests/` directory at the project root:
+New test files belong under:
 
 ```
 tests/
 ├── conftest.py
-├── test_validate_strict.py
-├── test_recipe_builder.py
-└── manufacturers/
-    └── bosch/
-        └── test_edc17_extractor.py
+├── tuning/
+│   ├── test_validate_strict.py
+│   ├── test_recipe_builder.py
+│   └── manufacturers/
+│       └── bosch/
+│           └── test_edc17_extractor.py
 ```
 
 Run tests with:
@@ -262,7 +267,7 @@ uv run pytest
 
 ## Submitting a Pull Request
 
-1. **Fork** the repository and create a branch from `main`:
+1. **Fork** the repository and create a branch from `master`:
    ```bash
    git checkout -b feat/siemens-sid206-extractor
    ```
@@ -277,7 +282,7 @@ uv run pytest
    - How did you test it?
    - Any known limitations or edge cases?
 
-5. **Open the PR** against the `main` branch.
+5. **Open the PR** against the `master` branch.
 
 ---
 
@@ -285,8 +290,8 @@ uv run pytest
 
 Open a GitHub Issue and include:
 
-- The endpoint you called (`/identify`, `/analyze`, `/patch/validate/strict`, etc.)
-- The response you got
+- The CLI command you ran or the endpoint you called
+- The output you got
 - What you expected instead
 - The file size of the binary (do **not** attach the binary itself — see below)
 - Any printable ASCII strings visible near the start of the file, if you are comfortable sharing them
@@ -303,5 +308,4 @@ ECU firmware is proprietary. The binaries contain intellectual property belongin
 
 If you need to share a binary to reproduce a bug, do so privately (e.g. via a direct message to a maintainer) and only after confirming you are the legal owner of the data.
 
-The `src/public/original.bin` file in this repository is the only binary that belongs here, and it is used solely as a controlled test artifact for the sample recipe.
-```
+There are no binary files in this repository. All tests use synthetic in-memory data generated by the test helpers in `tests/conftest.py`.

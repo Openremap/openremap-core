@@ -84,7 +84,7 @@ class AnalysisStatisticsSchema(BaseModel):
 
 class AnalyzerResponseSchema(BaseModel):
     """
-    Full analysis response — format-4.0 recipe ready for MongoDB storage
+    Full analysis response — format-4.0 recipe ready for serialisation
     and direct consumption by the patcher pipeline.
     """
 

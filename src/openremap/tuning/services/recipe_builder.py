@@ -206,7 +206,7 @@ class ECUDiffAnalyzer:
         """
         Build the full format-4.0 recipe dict.
 
-        Ready for the JSON API response and MongoDB storage.
+        Ready to be serialised, stored, or passed directly to the patcher pipeline.
         Consumed directly by: ecu_validate_strict, ecu_validate_exists,
         ecu_validate_patched, ecu_patcher.
 

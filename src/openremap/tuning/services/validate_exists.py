@@ -1,6 +1,6 @@
 """
-ECU Existence Validator — API service
-=======================================
+ECU Existence Validator
+========================
 For every instruction in a recipe, searches the ENTIRE target ECU binary
 for the original bytes (ob field) and classifies each result as:
 
@@ -8,8 +8,8 @@ for the original bytes (ob field) and classifies each result as:
   SHIFTED — found in the file but at a different offset (map moved)
   MISSING — not found anywhere in the file (wrong ECU / already modified)
 
-Operates entirely on in-memory bytes — no file I/O, no CLI.
-Designed to be called from the FastAPI router.
+Operates entirely on in-memory bytes — no file I/O.
+Can be used from the CLI, the API layer, or any other caller.
 
 Rules:
 - Scans ALL instructions before reporting (never aborts early).

@@ -74,7 +74,7 @@ class BaseManufacturerExtractor(ABC):
         """
         List of ECU families this extractor handles.
         e.g. ["EDC17", "MEDC17", "MED17", "EDC16"]
-        Used for documentation and discovery endpoints.
+        Used for documentation and family discovery.
         """
 
     # -----------------------------------------------------------------------

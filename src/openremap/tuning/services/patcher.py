@@ -1,6 +1,6 @@
 """
-ECU Patcher — API service
-==========================
+ECU Patcher
+============
 Applies a recipe (format 4.0) to a target ECU binary entirely in memory.
 
 Search strategy — EXACT + context anchor:
@@ -19,8 +19,8 @@ Safety guarantees:
     2. The patched bytes are only returned if every single instruction
        succeeded.  A partial result is never handed back to the caller.
 
-Operates entirely on in-memory bytes — no file I/O, no CLI.
-Designed to be called from the FastAPI router.
+Operates entirely on in-memory bytes — no file I/O.
+Can be used from the CLI, the API layer, or any other caller.
 """
 
 import hashlib

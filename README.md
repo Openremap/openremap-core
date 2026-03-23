@@ -33,7 +33,7 @@ All current extractors are Bosch. The registry is built to be extended to any ma
 Requires Python 3.14+ and [uv](https://github.com/astral-sh/uv).
 
 ```bash
-git clone https://github.com/your-username/openremap.git
+git clone https://github.com/Pinelo92/openremap.git
 cd openremap
 uv sync
 ```

@@ -6,7 +6,7 @@ This registry composes them in inter-manufacturer priority order —
 first match wins when a binary is submitted.
 
 Adding a new manufacturer:
-    1. Create src/tuning/manufacturers/<brand>/
+    1. Create src/openremap/tuning/manufacturers/<brand>/
     2. Implement extractors — subclass BaseManufacturerExtractor
     3. Expose EXTRACTORS: list[BaseManufacturerExtractor] in <brand>/__init__.py
     4. Import the package here and unpack it into EXTRACTORS below

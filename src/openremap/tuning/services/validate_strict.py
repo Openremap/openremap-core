@@ -1,11 +1,11 @@
 """
-ECU Strict Offset Validator — API service
-==========================================
+ECU Strict Offset Validator
+============================
 Validates a target ECU binary against a recipe by reading the EXACT offset
 and comparing the EXACT original bytes (ob field) for every instruction.
 
-Operates entirely on in-memory bytes — no file I/O, no CLI.
-Designed to be called from the FastAPI router.
+Operates entirely on in-memory bytes — no file I/O.
+Can be used from the CLI, the API layer, or any other caller.
 
 Rules:
 - Scans ALL instructions before reporting (never aborts early).
