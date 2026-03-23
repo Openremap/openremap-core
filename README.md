@@ -1,5 +1,7 @@
 # OpenRemap
 
+[![CI](https://github.com/Pinelo92/openremap/actions/workflows/ci.yml/badge.svg)](https://github.com/Pinelo92/openremap/actions/workflows/ci.yml)
+
 > ⚠️ **Research and educational use only.** Any output produced by this software must be reviewed by a qualified professional before being flashed to a vehicle. The authors accept no liability for damage, loss, or legal consequences arising from its use. Read the full [DISCLAIMER](DISCLAIMER.md) before proceeding.
 
 Open-source ECU binary analysis and patching toolkit. Diff a stock and a tuned binary to produce a portable JSON **recipe**, then validate and apply that recipe to any compatible ECU — with strict pre- and post-patch verification at every step.
