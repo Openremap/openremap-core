@@ -13,6 +13,7 @@ from openremap.tuning.manufacturers.bosch.m2x.extractor import BoschM2xExtractor
 from openremap.tuning.manufacturers.bosch.m3x.extractor import BoschM3xExtractor
 from openremap.tuning.manufacturers.bosch.m5x.extractor import BoschM5xExtractor
 from openremap.tuning.manufacturers.bosch.me7.extractor import BoschME7Extractor
+from openremap.tuning.manufacturers.bosch.me9.extractor import BoschME9Extractor
 from openremap.tuning.manufacturers.base import BaseManufacturerExtractor
 
 # ---------------------------------------------------------------------------
@@ -99,6 +100,14 @@ from openremap.tuning.manufacturers.base import BaseManufacturerExtractor
 # BoschME7Extractor  — ME7 family: no EDC17/MEDC17 signatures, must be
 #                      confirmed before the broad BoschExtractor runs.
 #
+# BoschME9Extractor   — ME9 family (2000–2005): Bosch Motronic ME9 full 2 MB
+#                       flash dumps. Detected by the unique
+#                       "Bosch.Common.RamLoader.Me9" string (absent from all
+#                       other Bosch families). MED9 bins are explicitly
+#                       excluded so this extractor never conflicts with
+#                       BoschExtractor. Must come before BoschExtractor
+#                       (which rejects ME9 via Guard 3 but runs last anyway).
+#
 # BoschEDC15Extractor — EDC15 family (1997–2004): identified by TSW string
 #                       at 0x8000 (Format A) or 0xC3 fill + 1037 SW (Format B).
 #                       Must come before BoschExtractor to avoid the broad
@@ -119,6 +128,7 @@ EXTRACTORS: list[BaseManufacturerExtractor] = [
     BoschLHExtractor(),
     BoschM5xExtractor(),
     BoschME7Extractor(),
+    BoschME9Extractor(),
     BoschEDC16Extractor(),
     BoschEDC15Extractor(),
     BoschExtractor(),
@@ -139,4 +149,5 @@ __all__ = [
     "BoschM3xExtractor",
     "BoschM5xExtractor",
     "BoschME7Extractor",
+    "BoschME9Extractor",
 ]

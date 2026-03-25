@@ -14,6 +14,7 @@ from typing import Dict, List, Optional
 from openremap.tuning.manufacturers.base import BaseManufacturerExtractor
 from openremap.tuning.manufacturers.bosch.edc17.patterns import (
     DETECTION_SIGNATURES,
+    FAMILY_BASE_NAMES,
     FAMILY_RESOLUTION_ORDER,
     MCU_CONSTANTS,
     PATTERN_REGIONS,
@@ -114,6 +115,17 @@ class BoschExtractor(BaseManufacturerExtractor):
         ):
             return False
 
+        # ------------------------------------------------------------------
+        # Guard 3 — reject pure Bosch ME9 full flash dumps.
+        # ME9 and MED9 ECUs share the same "RamLoader.Me9.0001" bootloader
+        # string, so the presence of that string alone is not enough to
+        # reject. Only reject when the RamLoader string is present AND no
+        # MED9 family content exists — MED9 bins always contain b"MED9"
+        # (e.g. "MED9510/..." or "MED91/...") while pure ME9 bins do not.
+        # ------------------------------------------------------------------
+        if b"RamLoader.Me9" in data[:0x200000] and b"MED9" not in data:
+            return False
+
         return any(sig in data for sig in DETECTION_SIGNATURES)
 
     # -----------------------------------------------------------------------
@@ -150,7 +162,11 @@ class BoschExtractor(BaseManufacturerExtractor):
         result["ecu_variant"] = ecu_variant
 
         # --- Step 4: Resolve ECU family ---
-        ecu_family = self._resolve_ecu_family(raw_hits)
+        # ecu_variant is passed as a fallback: if no explicit family string is
+        # found in the binary, the family is inferred from the variant name
+        # (e.g. "EDC17C66" → "EDC17"). This covers binaries where the family
+        # token is absent or lives past the search region boundary.
+        ecu_family = self._resolve_ecu_family(raw_hits, ecu_variant=ecu_variant)
         result["ecu_family"] = ecu_family
 
         # --- Step 5: Resolve calibration version ---
@@ -204,9 +220,21 @@ class BoschExtractor(BaseManufacturerExtractor):
     def _run_patterns(self, data: bytes) -> Dict[str, List[str]]:
         """
         Run all Bosch patterns against their assigned search regions.
-        Delegates to the shared engine on BaseManufacturerExtractor.
+
+        Overrides the default max_results=5 cap for software_version — large
+        2MB MED9/MD1 full flash bins contain many garbage digit runs before
+        the real 1037-prefixed SW string, and 5 results are not enough to
+        reach it. All other patterns keep the default cap.
         """
-        return self._run_all_patterns(data, PATTERNS, PATTERN_REGIONS, SEARCH_REGIONS)
+        raw_hits = self._run_all_patterns(
+            data, PATTERNS, PATTERN_REGIONS, SEARCH_REGIONS
+        )
+        # Re-run SW with a higher cap so the real 1037 string is not crowded
+        # out by garbage hits earlier in the file.
+        raw_hits["software_version"] = self._search(
+            data, PATTERNS["software_version"], SEARCH_REGIONS["full"], max_results=25
+        )
+        return raw_hits
 
     # -----------------------------------------------------------------------
     # Internal — field resolvers
@@ -214,15 +242,20 @@ class BoschExtractor(BaseManufacturerExtractor):
 
     def _resolve_ecu_variant(self, raw_hits: Dict[str, List[str]]) -> Optional[str]:
         """
-        Resolve the specific ECU hardware variant (e.g. "EDC17C66").
+        Resolve the specific ECU hardware variant (e.g. "EDC17C66", "MED9510").
 
         Priority:
           1. Extract from authoritative variant string
              e.g. "47/1/EDC17C66/1/P1262//..." -> "EDC17C66"
              This is the most reliable source.
-          2. Fall back to bare ecu_variant regex hits.
+          2. Fall back to bare ecu_variant regex hits (EDC17Cxx).
              These can match project/config names like "P_000_EDC17C01.10.0.0"
              so they are used only when no authoritative string is found.
+          3. Fall back to the full family-pattern match when it contains
+             sub-version digits (e.g. "MED9510", "MED91", "MEDC17.7").
+             This promotes the specific version string to variant so that
+             ecu_family can hold only the canonical base name ("MED9",
+             "MEDC17", etc.) rather than the full versioned string.
         """
         # Priority 1 — authoritative variant string
         if "ecu_variant_string" in raw_hits:
@@ -234,22 +267,57 @@ class BoschExtractor(BaseManufacturerExtractor):
                 if match:
                     return match.group().decode("ascii").rstrip(".-_")
 
-        # Priority 2 — bare regex hit
+        # Priority 2 — bare EDC17Cxx regex hit
         if "ecu_variant" in raw_hits:
             return raw_hits["ecu_variant"][0].rstrip(".-_")
 
-        return None
-
-    def _resolve_ecu_family(self, raw_hits: Dict[str, List[str]]) -> Optional[str]:
-        """
-        Resolve the ECU family string (e.g. "MEDC17", "EDC17").
-
-        Checks family keys in FAMILY_RESOLUTION_ORDER — most specific first.
-        Strips trailing dots and separators from the matched value.
-        """
+        # Priority 3 — full family-pattern match that includes sub-version digits.
+        # The family resolver normalises these to their base name; the full
+        # string (e.g. "MED9510", "MED91", "MEDC17.7") belongs here as variant.
         for family_key in FAMILY_RESOLUTION_ORDER:
             if family_key in raw_hits:
-                return raw_hits[family_key][0].rstrip(".-_")
+                full = raw_hits[family_key][0].rstrip(".-_")
+                base = FAMILY_BASE_NAMES.get(family_key, "")
+                # Only promote to variant when the matched string is longer
+                # than the bare base name — "MED9510" > "MED9", "MEDC17.7" > "MEDC17".
+                if base and len(full) > len(base):
+                    return full
+                break  # base name only — no useful variant to promote
+
+        return None
+
+    def _resolve_ecu_family(
+        self,
+        raw_hits: Dict[str, List[str]],
+        ecu_variant: Optional[str] = None,
+    ) -> Optional[str]:
+        """
+        Resolve the canonical ECU family name (e.g. "MEDC17", "EDC17", "MED9").
+
+        Always returns the base family name — never a sub-versioned string.
+        Sub-version details (e.g. "MED9510", "MEDC17.7") belong in ecu_variant.
+
+        Priority:
+          1. Canonical base name from FAMILY_BASE_NAMES, keyed by which
+             family pattern matched. Most specific first (MEDC17 before EDC17).
+          2. Infer from ecu_variant when no family pattern matched at all —
+             e.g. "EDC17C66" → "EDC17". Covers bins where the family token
+             is absent or lies past the 320 KB search region boundary.
+        """
+        # Priority 1 — normalise matched family string to its base name
+        for family_key in FAMILY_RESOLUTION_ORDER:
+            if family_key in raw_hits:
+                return FAMILY_BASE_NAMES.get(
+                    family_key,
+                    raw_hits[family_key][0].rstrip(".-_"),
+                )
+
+        # Priority 2 — infer from variant (most specific prefix first)
+        if ecu_variant:
+            for prefix in ("MEDC17", "EDC17", "MED17", "ME17", "MD1", "MED9"):
+                if ecu_variant.upper().startswith(prefix):
+                    return prefix
+
         return None
 
     def _resolve_software_version(
@@ -313,6 +381,15 @@ class BoschExtractor(BaseManufacturerExtractor):
                     digits_only = re.sub(r"[^0-9]", "", hit)
                     if digits_only and len(set(digits_only)) == 1:
                         continue
+                    # Reject calibration-table garbage from wiped ident blocks.
+                    # When a tuner erases the SW ident region the pattern engine
+                    # falls back to calibration map data, which produces strings
+                    # like "15678999999999" (nine 9s) or "976555544345544C"
+                    # (four 5s).  Real Bosch SW versions are pseudo-random
+                    # 10-digit codes — they never contain a run of 4 or more
+                    # consecutive identical digits.
+                    if re.search(r"(\d)\1{3,}", digits_only):
+                        continue
                     # Enforce minimum length — real Bosch SW versions are always
                     # at least 10 characters. Shorter hits are noise from
                     # calibration data regions or partial pattern overlaps.
@@ -324,9 +401,46 @@ class BoschExtractor(BaseManufacturerExtractor):
             return None
 
         # Prefer canonical Bosch "1037"-prefixed SW versions (most authoritative).
-        # Among those pick the longest, capped at 18 chars to avoid garbage runs.
+        # All EDC17 / MEDC17 / MED17 / ME17 / MD1 / MED9 calibrations use the
+        # "1037" prefix without exception.  If no "1037" candidate survived the
+        # filters above it means the ident block was wiped or is unreadable —
+        # returning None is more honest than producing a garbage match key from
+        # calibration table data.
         bosch_canonical = [c for c in candidates if c.startswith("1037")]
+
+        if not bosch_canonical:
+            return None
+
         if bosch_canonical:
+            # Remove prefix-extension false matches.
+            # These occur when a real SW string (e.g. "1037381976") is stored
+            # in the binary with no null separator before the next field
+            # (e.g. OEM part number "03C906056CP"), causing the regex to
+            # greedily produce "103738197603C906" by absorbing the leading
+            # digits of the OEM string.
+            #
+            # Detection: if candidate A starts with candidate B and the
+            # character immediately following B in A is a digit, then A is
+            # just B with extra digits from the adjacent field — remove A.
+            def _is_digit_extension(longer: str, shorter: str) -> bool:
+                if longer == shorter or not longer.startswith(shorter):
+                    return False
+                next_char = longer[len(shorter)]
+                return next_char.isdigit()
+
+            cleaned = [
+                c
+                for c in bosch_canonical
+                if not any(
+                    _is_digit_extension(c, other)
+                    for other in bosch_canonical
+                    if other != c
+                )
+            ]
+            bosch_canonical = cleaned or bosch_canonical
+
+            # Among remaining candidates pick the longest, capped at 18 chars
+            # to avoid picking up garbage digit runs.
             return max(bosch_canonical, key=lambda c: len(c) if len(c) <= 18 else 0)
 
         # Fallback — longest candidate, capped at 18 chars

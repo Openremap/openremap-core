@@ -588,14 +588,18 @@ class TestExtractSoftwareVersion:
         # No 1037xxxxxx string → None
         assert result.get("software_version") is None
 
-    def test_sw_version_10sw_format_detected(self):
+    def test_sw_version_10sw_format_not_returned_without_1037(self):
+        # "10SW041803126266V1" matches the raw pattern but does NOT start with
+        # "1037".  All real-world EDC17 / MEDC17 / MED17 / ME17 / MD1 / MED9
+        # calibrations use the "1037" prefix without exception.  When no
+        # 1037-prefixed candidate survives the filters (e.g. wiped ident block)
+        # the resolver now returns None rather than falling back to arbitrary
+        # digit strings from calibration table regions.
         buf = make_bin(SIZE_512KB)
         write(buf, 0x1000, b"EDC17")
         write(buf, 0x2000, b"10SW041803126266V1")
         result = EXTRACTOR.extract(bytes(buf), "t.bin")
-        sw = result.get("software_version") or ""
-        # Pattern matches 4 digits + optional letters + 6+ digits + optional suffix
-        assert len(sw) >= 10
+        assert result.get("software_version") is None
 
 
 # ---------------------------------------------------------------------------

@@ -18,16 +18,21 @@ manufacturer/family sub-folders (e.g. scanned/Bosch/EDC17/) and create all
 required directories automatically.
 
 Examples:
-    openremap scan                              # dry-run in current directory
-    openremap scan ./my_bins/                   # dry-run in a specific directory
-    openremap scan ./my_bins/ --move            # sort files (flat folders must exist)
-    openremap scan ./my_bins/ --move --create-dirs  # sort, creating flat folders first
-    openremap scan ./my_bins/ --move --organize     # sort into manufacturer/family tree
-    openremap scan ./my_bins/ --organize            # preview the organized layout
+    openremap scan                                   # dry-run in current directory
+    openremap scan ./my_bins/                        # dry-run in a specific directory
+    openremap scan ./my_bins/ --move                 # sort files (flat folders must exist)
+    openremap scan ./my_bins/ --move --create-dirs   # sort, creating flat folders first
+    openremap scan ./my_bins/ --move --organize      # sort into manufacturer/family tree
+    openremap scan ./my_bins/ --organize             # preview the organized layout
+    openremap scan ./my_bins/ --report report.json   # dry-run + write JSON report
+    openremap scan ./my_bins/ --report report.csv    # dry-run + write CSV report
 """
 
 from __future__ import annotations
 
+import csv
+import hashlib
+import json
 import re
 import time
 from pathlib import Path
@@ -37,6 +42,7 @@ import typer
 
 from openremap.tuning.manufacturers import EXTRACTORS
 from openremap.tuning.manufacturers.base import BaseManufacturerExtractor
+from openremap.tuning.services.confidence import ConfidenceResult, score_identity
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -55,6 +61,15 @@ ALL_DEST = [DEST_SCANNED, DEST_SW_MISSING, DEST_CONTESTED, DEST_UNKNOWN, DEST_TR
 # Only these destinations have a single confirmed extractor to derive
 # manufacturer/family from — all others stay flat under --organize.
 ORGANIZABLE_DEST = {DEST_SCANNED, DEST_SW_MISSING}
+
+# Confidence tier → Typer colour mapping
+_TIER_COLOURS: dict[str, str] = {
+    "High": typer.colors.GREEN,
+    "Medium": typer.colors.YELLOW,
+    "Low": typer.colors.MAGENTA,
+    "Suspicious": typer.colors.RED,
+    "Unknown": typer.colors.CYAN,
+}
 
 # ---------------------------------------------------------------------------
 # Result class
@@ -149,12 +164,15 @@ def classify_file(data: bytes, filename: str) -> ScanResult:
 
     sw = extraction.get("software_version")
     cal = extraction.get("calibration_id")
-    family = extraction.get("ecu_family") or "?"
+    family = extraction.get("ecu_family") or ""
     variant = extraction.get("ecu_variant") or ""
     hw = extraction.get("hardware_number") or ""
     key = extraction.get("match_key") or ""
 
-    family_str = f"{family}/{variant}" if variant and variant != family else family
+    # Build individual display tokens — shown separately so both are visible
+    # even when one is missing. Avoids "?/EDC17C66" or silent omissions.
+    family_display = family or "?"
+    variant_part = f"  variant: {variant}" if variant and variant != family else ""
 
     if key:
         if sw:
@@ -166,7 +184,9 @@ def classify_file(data: bytes, filename: str) -> ScanResult:
 
         detail = (
             f"extractor: {extractor.__class__.__name__}  "
-            f"family: {family_str}  {version_detail}"
+            f"family: {family_display}"
+            + variant_part
+            + f"  {version_detail}"
             + (f"  hw: {hw}" if hw else "")
             + (f"  key: {key}" if key else "")
         )
@@ -174,7 +194,9 @@ def classify_file(data: bytes, filename: str) -> ScanResult:
     else:
         detail = (
             f"extractor: {extractor.__class__.__name__}  "
-            f"family: {family_str}  sw: None"
+            f"family: {family_display}"
+            + variant_part
+            + f"  sw: None"
             + (f"  cal_id: {cal}" if cal else "")
             + (f"  hw: {hw}" if hw else "")
         )
@@ -187,6 +209,87 @@ def classify_file(data: bytes, filename: str) -> ScanResult:
         destination=destination,
         detail=detail,
     )
+
+
+# ---------------------------------------------------------------------------
+# Confidence rendering helpers
+# ---------------------------------------------------------------------------
+
+
+def _render_confidence_tag(confidence: ConfidenceResult) -> str:
+    """
+    Return a short coloured inline tag for the scan detail line.
+
+    Format:  [HIGH]  or  [SUSPICIOUS ⚠ IDENT BLOCK MISSING]
+    """
+    colour = _TIER_COLOURS.get(confidence.tier, typer.colors.WHITE)
+    tier_label = typer.style(confidence.tier.upper(), fg=colour, bold=True)
+
+    if confidence.warnings:
+        warn_parts = "  ".join(
+            typer.style(f"⚠ {w}", fg=typer.colors.RED) for w in confidence.warnings
+        )
+        return f"[{tier_label}]  {warn_parts}"
+    return f"[{tier_label}]"
+
+
+# ---------------------------------------------------------------------------
+# Report helpers
+# ---------------------------------------------------------------------------
+
+
+def _build_report_row(
+    filepath: Path,
+    result: ScanResult,
+    confidence: Optional[ConfidenceResult],
+    sha256: Optional[str],
+    elapsed_ms: float,
+) -> dict:
+    """Build a flat dict suitable for JSON / CSV report output."""
+    extraction = result.extraction or {}
+    row: dict = {
+        "filename": filepath.name,
+        "destination": result.destination,
+        "manufacturer": extraction.get("manufacturer"),
+        "ecu_family": extraction.get("ecu_family"),
+        "ecu_variant": extraction.get("ecu_variant"),
+        "software_version": extraction.get("software_version"),
+        "hardware_number": extraction.get("hardware_number"),
+        "calibration_id": extraction.get("calibration_id"),
+        "match_key": extraction.get("match_key"),
+        "file_size": filepath.stat().st_size if filepath.exists() else None,
+        "sha256": sha256,
+        "elapsed_ms": round(elapsed_ms, 2),
+    }
+    if confidence is not None:
+        row["confidence_score"] = confidence.score
+        row["confidence_tier"] = confidence.tier
+        row["confidence_warnings"] = "; ".join(confidence.warnings)
+    else:
+        row["confidence_score"] = None
+        row["confidence_tier"] = None
+        row["confidence_warnings"] = None
+    return row
+
+
+def _write_report(rows: list[dict], report_path: Path) -> None:
+    """Write the accumulated report rows to a JSON or CSV file."""
+    suffix = report_path.suffix.lower()
+
+    if suffix == ".json":
+        report_path.write_text(json.dumps(rows, indent=2), encoding="utf-8")
+    elif suffix == ".csv":
+        if not rows:
+            report_path.write_text("", encoding="utf-8")
+            return
+        fieldnames = list(rows[0].keys())
+        with report_path.open("w", newline="", encoding="utf-8") as fh:
+            writer = csv.DictWriter(fh, fieldnames=fieldnames)
+            writer.writeheader()
+            writer.writerows(rows)
+    else:
+        # Unsupported extension — fall back to JSON so data is not lost.
+        report_path.write_text(json.dumps(rows, indent=2), encoding="utf-8")
 
 
 # ---------------------------------------------------------------------------
@@ -248,7 +351,13 @@ def _organized_dest_dir(base_dest: Path, result: ScanResult) -> Path:
     manufacturer = _safe_folder_name(
         extraction.get("manufacturer") or "unknown_manufacturer"
     )
-    family = _safe_folder_name(extraction.get("ecu_family") or "unknown_family")
+    # Use ecu_variant as a fallback when ecu_family is absent — better to
+    # land in scanned/Bosch/EDC17C66/ than in scanned/Bosch/unknown_family/.
+    family = _safe_folder_name(
+        extraction.get("ecu_family")
+        or extraction.get("ecu_variant")
+        or "unknown_family"
+    )
     return base_dest / manufacturer / family
 
 
@@ -332,6 +441,23 @@ def scan(
             ),
         ),
     ] = False,
+    report: Annotated[
+        Optional[Path],
+        typer.Option(
+            "--report",
+            "-r",
+            help=(
+                "Write a structured scan report to a file. "
+                "The format is determined by the file extension: "
+                ".json produces a JSON array, .csv produces a CSV table. "
+                "Any other extension falls back to JSON. "
+                "The report includes identification fields, confidence score, "
+                "tier, and warnings for every scanned file."
+            ),
+            writable=True,
+            resolve_path=True,
+        ),
+    ] = None,
 ) -> None:
     """
     Batch-scan a directory of ECU binaries through all registered extractors.
@@ -353,6 +479,9 @@ def scan(
     Use --organize to further sort scanned and sw_missing files into
     manufacturer/family sub-folders (e.g. scanned/Bosch/EDC17/).
     --organize creates all required directories automatically.
+
+    Use --report path.json or --report path.csv to save a structured report
+    with identification results, confidence scores, and warnings for every file.
     """
     if not directory.is_dir():
         typer.echo(
@@ -364,6 +493,18 @@ def scan(
             err=True,
         )
         raise typer.Exit(code=1)
+
+    # Validate report path extension early so we fail fast before doing work.
+    if report is not None:
+        report_suffix = report.suffix.lower()
+        if report_suffix not in (".json", ".csv"):
+            typer.echo(
+                typer.style(
+                    f"\n  Warning: unrecognised report extension '{report_suffix}' "
+                    f"— output will be JSON.\n",
+                    fg=typer.colors.YELLOW,
+                ),
+            )
 
     # --organize implies --create-dirs for the flat top-level folders.
     effective_create_dirs = create_dirs or organize
@@ -439,6 +580,9 @@ def scan(
         DEST_TRASH: (typer.colors.RED, "  TRASH      "),
     }
 
+    # Accumulate rows for the --report output (if requested).
+    report_rows: list[dict] = []
+
     for idx, filepath in enumerate(candidates, start=1):
         label_idx = typer.style(f"[{idx:>{idx_width}}/{total}]", dim=True)
         ext = filepath.suffix.lower()
@@ -451,6 +595,16 @@ def scan(
             counts[DEST_TRASH] += 1
             tag = typer.style("  TRASH      ", fg=typer.colors.RED)
             typer.echo(f"{label_idx}{tag}{filepath.name}")
+            if report is not None:
+                report_rows.append(
+                    _build_report_row(
+                        filepath,
+                        ScanResult([], None, None, DEST_TRASH, "wrong extension"),
+                        None,
+                        None,
+                        0.0,
+                    )
+                )
             continue
 
         # --- Read binary ---
@@ -468,6 +622,18 @@ def scan(
         t0 = time.perf_counter()
         result = classify_file(data, filepath.name)
         elapsed_ms = (time.perf_counter() - t0) * 1000
+
+        # --- Confidence scoring ---
+        # Only score files where we have an extraction result (scanned / sw_missing).
+        # For contested, unknown, and trash we still call score_identity so the
+        # "Unknown" tier is reported correctly in the --report output.
+        identity_for_scoring: dict = result.extraction or {}
+        confidence = score_identity(identity_for_scoring, filename=filepath.name)
+
+        # --- SHA-256 for the report ---
+        sha256_hex: Optional[str] = None
+        if report is not None:
+            sha256_hex = hashlib.sha256(data).hexdigest()
 
         # --- Resolve actual destination directory ---
         if organize:
@@ -490,11 +656,18 @@ def scan(
 
         typer.echo(f"{label_idx}{tag}{filepath.name}{timing}")
 
-        # Build the detail line, appending the organized sub-path when relevant.
+        # --- Build detail line ---
         detail = result.detail
+
+        # Append organised sub-path when relevant.
         if organize and result.destination in ORGANIZABLE_DEST:
             rel = actual_dest.relative_to(directory)
             detail += typer.style(f"  → {rel}/", fg=typer.colors.CYAN)
+
+        # Append confidence tag for identified files (scanned / sw_missing).
+        if result.destination in (DEST_SCANNED, DEST_SW_MISSING):
+            conf_tag = _render_confidence_tag(confidence)
+            detail += f"  {conf_tag}"
 
         typer.echo(
             typer.style(
@@ -502,6 +675,12 @@ def scan(
                 dim=True,
             )
         )
+
+        # --- Accumulate report row ---
+        if report is not None:
+            report_rows.append(
+                _build_report_row(filepath, result, confidence, sha256_hex, elapsed_ms)
+            )
 
     elapsed_total = time.perf_counter() - start_all
 
@@ -533,6 +712,26 @@ def scan(
         typer.style(f"\n  Total: {total}  •  {elapsed_total:.2f}s", dim=True)
         + dry_run_note
     )
+
+    # --- Write report ---
+    if report is not None and report_rows:
+        try:
+            _write_report(report_rows, report)
+            typer.echo(
+                typer.style(
+                    f"\n  Report saved → {report}  ({len(report_rows)} rows)",
+                    fg=typer.colors.CYAN,
+                )
+            )
+        except OSError as exc:
+            typer.echo(
+                typer.style(
+                    f"\n  Error writing report: {exc}",
+                    fg=typer.colors.RED,
+                    bold=True,
+                ),
+                err=True,
+            )
 
     # --- Contextual tip for dry-run ---
     if dry_run:

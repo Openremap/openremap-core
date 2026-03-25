@@ -360,6 +360,10 @@ class BoschME7Extractor(BaseManufacturerExtractor):
              The family is always the 3rd slash-delimited field.
              e.g. "44/1/ME7.1.1/120/..." -> "ME7.1.1"
           2. Fall back to bare ecu_family regex hits.
+          3. Return "ME7" as a last-resort fallback — can_handle() already
+             confirmed this is an ME7 binary, so "ME7" is always correct
+             even when the specific variant string is absent or unreadable
+             (e.g. Citroen C2 1.6 VTS bins where no ASCII family token exists).
         """
         # Priority 1 — authoritative variant string
         if "ecu_variant_string" in raw_hits:
@@ -375,7 +379,9 @@ class BoschME7Extractor(BaseManufacturerExtractor):
         if "ecu_family" in raw_hits:
             return raw_hits["ecu_family"][0].rstrip(".-_")
 
-        return None
+        # Priority 3 — last resort: can_handle() guarantees ME7, so "ME7" is
+        # always a valid family name even without a readable family string.
+        return "ME7"
 
     def _resolve_hardware_number(self, raw_hits: Dict[str, List[str]]) -> Optional[str]:
         """

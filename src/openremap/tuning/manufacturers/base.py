@@ -255,7 +255,7 @@ class BaseManufacturerExtractor(ABC):
         """
         results: List[str] = []
         try:
-            for match in re.finditer(pattern, data[region], re.IGNORECASE):
+            for match in re.finditer(pattern, data[region]):
                 try:
                     value = match.group(0).decode("ascii", errors="ignore").strip()
                     if value and value not in results:

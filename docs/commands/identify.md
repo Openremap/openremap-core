@@ -2,7 +2,8 @@
 
 Read an ECU binary and print everything that can be extracted from it:
 manufacturer, ECU family, software version, hardware number, calibration ID,
-match key, file size, and SHA-256 hash.
+match key, file size, SHA-256 hash, and a **confidence assessment** of how
+likely the binary is to be an unmodified factory file.
 
 Use this to confirm what a binary is before doing anything else with it.
 
@@ -58,17 +59,49 @@ openremap identify ecu.bin --output result.txt
 
 ```
   ecu.bin
-  Bosch · MEDC17
+  Bosch · EDC17
 
   Manufacturer      Bosch
-  ECU Family        MEDC17
+  ECU Family        EDC17
   ECU Variant       EDC17C66
-  Software Version  1037541778126241V0
-  Hardware Number   unknown
+  Software Version  1037541778
+  Hardware Number   0261209352
   Calibration ID    unknown
-  Match Key         EDC17C66::1037541778126241V0
+  Match Key         EDC17C66::1037541778
+  File Size         2,097,152 bytes
+  SHA-256           3dc19aa03f3293bac4d27f28a22a073c...
+
+  ── Confidence ─────────────────────────────────────────────────────────────
+  Tier   HIGH
+  Signal  +  canonical SW version (1037-prefixed)
+  Signal  +  hardware number present (0261209352)
+  Signal  +  ECU variant identified (EDC17C66)
+```
+
+### With warnings (wiped ident block)
+
+```
+  1.bin
+  Bosch · EDC17
+
+  Manufacturer      Bosch
+  ECU Family        EDC17
+  ECU Variant       EDC17C60
+  Software Version  unknown
+  Hardware Number   unknown
+  Calibration ID    08001508446612B
+  Match Key         EDC17C60::08001508446612B
   File Size         4,194,304 bytes
-  SHA-256           00f727e8abf62d384acc4420b08fe8e...
+  SHA-256           ...
+
+  ── Confidence ─────────────────────────────────────────────────────────────
+  Tier   SUSPICIOUS
+  Signal  -  SW ident absent — no match key produced
+  Signal  +  ECU variant identified (EDC17C60)
+  Signal  +  calibration ID present (080015084466)
+  Signal  -  generic numbered filename
+  ⚠  IDENT BLOCK MISSING
+  ⚠  GENERIC FILENAME
 ```
 
 ### JSON (`--json`)
@@ -76,14 +109,24 @@ openremap identify ecu.bin --output result.txt
 ```json
 {
   "manufacturer": "Bosch",
-  "ecu_family": "MEDC17",
+  "ecu_family": "EDC17",
   "ecu_variant": "EDC17C66",
-  "software_version": "1037541778126241V0",
-  "hardware_number": null,
+  "software_version": "1037541778",
+  "hardware_number": "0261209352",
   "calibration_id": null,
-  "match_key": "EDC17C66::1037541778126241V0",
-  "file_size": 4194304,
-  "sha256": "00f727e8abf62d384acc4420b08fe8e..."
+  "match_key": "EDC17C66::1037541778",
+  "file_size": 2097152,
+  "sha256": "3dc19aa03f3293bac4d27f28a22a073c...",
+  "confidence": {
+    "score": 75,
+    "tier": "High",
+    "signals": [
+      { "delta": 40, "label": "canonical SW version (1037-prefixed)" },
+      { "delta": 25, "label": "hardware number present (0261209352)" },
+      { "delta": 10, "label": "ECU variant identified (EDC17C66)" }
+    ],
+    "warnings": []
+  }
 }
 ```
 
@@ -106,11 +149,16 @@ supported — see [CONTRIBUTING.md](../../CONTRIBUTING.md) for how to add one.
   Match Key         unknown
   File Size         524,288 bytes
   SHA-256           3f9a21c7d84b...
+
+  ── Confidence ─────────────────────────────────────────────────────────────
+  Tier   UNKNOWN
 ```
 
 ---
 
 ## What to look for
+
+### Identity fields
 
 | Field | What it tells you |
 |---|---|
@@ -124,18 +172,35 @@ supported — see [CONTRIBUTING.md](../../CONTRIBUTING.md) for how to add one.
 | **File Size** | Total size in bytes — a quick sanity check |
 | **SHA-256** | Cryptographic hash of the file — use this to confirm a file has not changed |
 
+### Confidence section
+
+| Tier | Meaning |
+|---|---|
+| **HIGH** | All key identifiers present and consistent — binary looks like an unmodified factory file |
+| **MEDIUM** | Most identifiers present, minor concerns only |
+| **LOW** | Some identifiers missing or a mild filename signal — usable, but inspect manually |
+| **SUSPICIOUS** | Strong signals of modification, wiped ident, or file tampering — treat with caution |
+| **UNKNOWN** | No extractor matched the binary — family not supported |
+
+Each `Signal` line shows what contributed to the tier. A `+` prefix means the signal increased confidence; a `-` prefix means it reduced it.
+
+Warnings (prefixed with `⚠`) are raised when specific red flags are detected — for example, when a software version is absent for a family that normally stores one.
+
 ### Good result
 
-All of the following should be filled in for a fully supported binary:
+All of the following should be filled in for a fully supported, original binary:
 
-- `Manufacturer` is a known name (not `unknown`)
+- `Manufacturer` is a known name
 - `ECU Family` is populated
-- `Match Key` is populated — if it is `unknown`, the recipe system cannot match this binary to a recipe
+- `Match Key` is populated
+- `Confidence` tier is **HIGH** or **MEDIUM**
 
 ### Needs attention
 
 - **`Software Version` is `unknown` but `Match Key` is populated** — the ECU architecture uses a different field (e.g. calibration ID) as the version component. This is by design for some families (e.g. LH-Jetronic). The binary is still usable.
 - **`Match Key` is `unknown`** — the extractor matched the file but could not build a version identifier. You can still cook a recipe from this binary, but applying it to other ECUs will not be possible without a match key.
+- **Confidence is `SUSPICIOUS` with `⚠ IDENT BLOCK MISSING`** — the software version field is absent for a family that normally stores it. This is a strong signal of a wiped or tampered ident block.
+- **Confidence is `SUSPICIOUS` with `⚠ TUNING KEYWORDS IN FILENAME`** — the filename suggests this is a modified file. Inspect the binary before using it as a base for a recipe.
 - **Everything is `unknown`** — the ECU family is not yet supported. See [CONTRIBUTING.md](../../CONTRIBUTING.md).
 
 ---
@@ -145,6 +210,7 @@ All of the following should be filled in for a fully supported binary:
 - `openremap identify` is completely read-only. It never modifies the file.
 - Only `.bin` and `.ori` files are accepted. Passing any other extension exits with an error.
 - The `--output` flag strips terminal colour codes automatically when writing to a file, so the saved text is clean and readable in any editor.
+- The confidence score in the JSON output is a raw numeric value for programmatic use. The `tier` field is the human-readable label.
 
 ---
 

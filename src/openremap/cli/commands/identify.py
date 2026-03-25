@@ -12,12 +12,13 @@ Examples:
 from __future__ import annotations
 
 import json
-import sys
+import re
 from pathlib import Path
 from typing import Optional
 
 import typer
 
+from openremap.tuning.services.confidence import ConfidenceResult, score_identity
 from openremap.tuning.services.identifier import identify_ecu
 
 app = typer.Typer(
@@ -40,6 +41,35 @@ _LABELS: list[tuple[str, str]] = [
     ("file_size", "File Size"),
     ("sha256", "SHA-256"),
 ]
+
+_TIER_COLOURS: dict[str, str] = {
+    "High": typer.colors.GREEN,
+    "Medium": typer.colors.YELLOW,
+    "Low": typer.colors.MAGENTA,
+    "Suspicious": typer.colors.RED,
+    "Unknown": typer.colors.CYAN,
+}
+
+
+def _format_confidence_inline(confidence: ConfidenceResult) -> str:
+    """Render the confidence result as a compact coloured string for the table."""
+    colour = _TIER_COLOURS.get(confidence.tier, typer.colors.WHITE)
+    tier_str = typer.style(confidence.tier.upper(), fg=colour, bold=True)
+    summary = confidence.rationale_summary(max_signals=3)
+    summary_str = typer.style(f"  {summary}", dim=True) if summary else ""
+    return f"{tier_str}{summary_str}"
+
+
+def _format_confidence_warnings(
+    confidence: ConfidenceResult, indent: str = "  "
+) -> str:
+    """Return a formatted warnings block, or an empty string when there are none."""
+    if not confidence.warnings:
+        return ""
+    lines = []
+    for w in confidence.warnings:
+        lines.append(indent + typer.style("⚠  " + w, fg=typer.colors.RED, bold=True))
+    return "\n".join(lines)
 
 
 def _format_table(result: dict) -> str:
@@ -105,7 +135,8 @@ def identify(
     Identify a single ECU binary.
 
     Prints manufacturer, ECU family, software version, hardware number,
-    calibration ID, match key, file size, and SHA-256 hash.
+    calibration ID, match key, file size, SHA-256 hash, and a confidence
+    assessment of how likely the binary is to be an unmodified factory file.
     """
     suffix = file.suffix.lower()
     if suffix not in (".bin", ".ori"):
@@ -148,8 +179,19 @@ def identify(
         )
         raise typer.Exit(code=1)
 
+    confidence = score_identity(result, filename=file.name)
+
     if as_json:
-        content = json.dumps(result, indent=2)
+        json_out = dict(result)
+        json_out["confidence"] = {
+            "score": confidence.score,
+            "tier": confidence.tier,
+            "signals": [
+                {"delta": s.delta, "label": s.label} for s in confidence.signals
+            ],
+            "warnings": confidence.warnings,
+        }
+        content = json.dumps(json_out, indent=2)
         _write_output(content, output)
         return
 
@@ -167,12 +209,42 @@ def identify(
 
     table = _format_table(result)
 
-    full_output = f"{header}\n{status_line}\n\n{table}\n"
+    # --- Confidence section ---
+    conf_colour = _TIER_COLOURS.get(confidence.tier, typer.colors.WHITE)
+    conf_header = typer.style(
+        f"\n  ── Confidence " + "─" * 37,
+        bold=True,
+    )
+    conf_tier_line = (
+        "  "
+        + typer.style("Tier   ", dim=True)
+        + typer.style(confidence.tier.upper(), fg=conf_colour, bold=True)
+    )
+
+    conf_signals_lines = []
+    for sig in confidence.signals:
+        colour = typer.colors.GREEN if sig.delta >= 0 else typer.colors.RED
+        marker = (
+            typer.style("+", fg=colour, bold=True)
+            if sig.delta >= 0
+            else typer.style("-", fg=colour, bold=True)
+        )
+        conf_signals_lines.append(
+            f"  {typer.style('Signal ', dim=True)} {marker}  {sig.label}"
+        )
+
+    conf_signals = "\n".join(conf_signals_lines)
+
+    warnings_block = _format_confidence_warnings(confidence, indent="  ")
+    warnings_section = f"\n{warnings_block}" if warnings_block else ""
+
+    confidence_section = (
+        f"{conf_header}\n{conf_tier_line}\n{conf_signals}{warnings_section}"
+    )
+
+    full_output = f"{header}\n{status_line}\n\n{table}\n{confidence_section}\n"
 
     if output:
-        # Strip ANSI codes when writing to a file
-        import re
-
         plain = re.sub(r"\x1b\[[0-9;]*m", "", full_output)
         output.write_text(plain, encoding="utf-8")
         typer.echo(f"Saved to {output}")

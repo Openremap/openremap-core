@@ -157,6 +157,29 @@ FAMILY_RESOLUTION_ORDER = [
 ]
 
 # ---------------------------------------------------------------------------
+# Canonical base family names
+# ---------------------------------------------------------------------------
+# Maps each family pattern key to the canonical base family name that should
+# be stored in ecu_family. The full matched string (e.g. "MED9510",
+# "MEDC17.7") goes to ecu_variant when it is longer than the base name.
+#
+# This separation ensures:
+#   - ecu_family is always a stable, groupable name  ("MED9", "EDC17", …)
+#   - ecu_variant carries the specific sub-version   ("MED9510", "MED91", …)
+#   - scan --organize produces consistent folders     (Bosch/MED9/, …)
+# ---------------------------------------------------------------------------
+
+FAMILY_BASE_NAMES: dict[str, str] = {
+    "ecu_family_medc17": "MEDC17",
+    "ecu_family_edc17": "EDC17",
+    "ecu_family_med17": "MED17",
+    "ecu_family_me17": "ME17",
+    "ecu_family_md1": "MD1",
+    "ecu_family_edc16": "EDC16",
+    "ecu_family_med9": "MED9",
+}
+
+# ---------------------------------------------------------------------------
 # Search regions
 # ---------------------------------------------------------------------------
 # Based on analysis of real Bosch EDC17/MEDC17 binaries.
@@ -194,23 +217,26 @@ PATTERN_REGIONS: Dict[str, str] = {
     "dataset_number": "ident_block",
     "customer_label": "ident_block",
     "hw_label": "ident_block",
-    # Full binary — SW version and label may be past the 64KB ident block in
-    # large (2MB+) EDC17 bins (e.g. Audi Q5 03L906022NH where SW lives at ~0x18001a)
+    # Full binary — SW version, label, family strings and variant strings may
+    # all live past the 64KB / 320KB boundaries in large (2MB+) bins.
+    # e.g. Audi Q5 03L906022NH: SW at ~0x18001a, family "EDC17_CP14" at 0x1a0a15
+    # e.g. Audi A3 1.6FSI MED9: family "MED9510" at 0x1c21f5
+    # Searching the full binary keeps family co-located with SW regardless of
+    # flash layout. Performance impact is negligible — SW is already full-binary.
     "software_version": "full",
     "sw_label": "full",
-    # Extended (320KB)
-    "ecu_variant": "extended",
-    "ecu_variant_string": "extended",
-    "ecu_family_medc17": "extended",
-    "ecu_family_edc17": "extended",
-    "ecu_family_med17": "extended",
-    "ecu_family_me17": "extended",
-    "ecu_family_md1": "extended",
-    "ecu_family_edc16": "extended",
-    "ecu_family_med9": "extended",
-    "calibration_version": "extended",
-    "sw_base_version": "extended",
-    "calibration_id": "extended",
+    "ecu_variant": "full",
+    "ecu_variant_string": "full",
+    "ecu_family_medc17": "full",
+    "ecu_family_edc17": "full",
+    "ecu_family_med17": "full",
+    "ecu_family_me17": "full",
+    "ecu_family_md1": "full",
+    "ecu_family_edc16": "full",
+    "ecu_family_med9": "full",
+    "calibration_version": "full",
+    "sw_base_version": "full",
+    "calibration_id": "full",
     "psa_calibration_id": "psa_header",
     # Full binary
     "hardware_number": "full",
