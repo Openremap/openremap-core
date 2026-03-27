@@ -1,15 +1,20 @@
 """
-openremap validate strict <target> <recipe>
-openremap validate exists <target> <recipe>
-openremap validate tuned  <tuned>  <recipe>
+openremap validate before  <target> <recipe>
+openremap validate check   <target> <recipe>
+openremap validate after   <tuned>  <recipe>
 
 Validate ECU binaries against a recipe before or after tuning.
 
 Examples:
-    openremap validate strict target.bin recipe.json
-    openremap validate exists target.bin recipe.json
-    openremap validate tuned  target_tuned.bin recipe.json
-    openremap validate strict target.bin recipe.json --json
+    openremap validate before target.bin recipe.json
+    openremap validate check  target.bin recipe.json
+    openremap validate after  target_tuned.bin recipe.json
+    openremap validate before target.bin recipe.json --json
+
+Deprecated aliases (still work, hidden from --help):
+    openremap validate strict  →  openremap validate before
+    openremap validate exists  →  openremap validate check
+    openremap validate tuned   →  openremap validate after
 """
 
 from __future__ import annotations
@@ -27,9 +32,9 @@ from openremap.tuning.services.validate_strict import ECUStrictValidator
 app = typer.Typer(
     help=(
         "Validate a binary against a recipe.\n\n"
-        "  strict  — verify ob bytes are at every recorded offset (run before tuning)\n"
-        "  exists  — search the entire binary for ob bytes (diagnose a strict failure)\n"
-        "  tuned   — confirm mb bytes were written correctly (run after tuning)"
+        "  before  — verify ob bytes are at every recorded offset (run before tuning)\n"
+        "  check   — search the entire binary for ob bytes (diagnose a before failure)\n"
+        "  after   — confirm mb bytes were written correctly (run after tuning)"
     ),
     no_args_is_help=True,
 )
@@ -154,53 +159,17 @@ def _warn_line(size_warn: str | None, match_key_warn: str | None) -> None:
 
 
 # ---------------------------------------------------------------------------
-# strict
+# Core implementation functions (shared between primary and alias commands)
 # ---------------------------------------------------------------------------
 
 
-@app.command()
-def strict(
-    target: Path = typer.Argument(
-        ...,
-        help="The unpatched ECU binary to validate (.bin or .ori).",
-        exists=True,
-        file_okay=True,
-        dir_okay=False,
-        readable=True,
-        resolve_path=True,
-    ),
-    recipe: Path = typer.Argument(
-        ...,
-        help="The recipe .json file to validate against.",
-        exists=True,
-        file_okay=True,
-        dir_okay=False,
-        readable=True,
-        resolve_path=True,
-    ),
-    as_json: bool = typer.Option(
-        False,
-        "--json",
-        help="Output the full validation report as JSON.",
-    ),
-    output: Optional[Path] = typer.Option(
-        None,
-        "--output",
-        "-o",
-        help="Save the report to a file instead of printing to stdout.",
-        resolve_path=True,
-    ),
+def _run_before(
+    target: Path,
+    recipe: Path,
+    as_json: bool,
+    output: Optional[Path],
 ) -> None:
-    """
-    Strict offset validation — verify ob bytes are at every recorded offset.
-
-    Reads the exact offset of every recipe instruction and compares the original
-    bytes (ob) against what is actually present in the binary. All instructions
-    are checked before reporting.
-
-    Run this before tuning. A result of safe_to_patch=true means every
-    instruction matched and it is safe to call 'openremap tune'.
-    """
+    """Core logic for 'validate before' (pre-flight strict check)."""
     target_data = _read_bin(target, "Target")
     recipe_dict = _read_recipe(recipe)
 
@@ -225,7 +194,7 @@ def strict(
     except Exception as exc:
         typer.echo(
             typer.style(
-                f"\n  Error: strict validation failed — {exc}",
+                f"\n  Error: pre-flight validation failed — {exc}",
                 fg=typer.colors.RED,
                 bold=True,
             ),
@@ -248,11 +217,9 @@ def strict(
     _warn_line(size_warn, match_key_warn)
 
     if safe:
-        typer.echo(typer.style("  ✅ Safe to patch", fg=typer.colors.GREEN, bold=True))
+        typer.echo(typer.style("  ✅ Safe to tune", fg=typer.colors.GREEN, bold=True))
     else:
-        typer.echo(
-            typer.style("  ❌ NOT safe to patch", fg=typer.colors.RED, bold=True)
-        )
+        typer.echo(typer.style("  ❌ NOT safe to tune", fg=typer.colors.RED, bold=True))
 
     col = 20
     typer.echo("")
@@ -271,60 +238,51 @@ def strict(
             f"  {'Failed':<{col}} "
             + typer.style(str(failed), fg=typer.colors.RED, bold=True)
         )
+
+        failed_results = [
+            r for r in report.get("results", []) if not r.get("passed", True)
+        ]
+        if failed_results:
+            typer.echo("")
+            typer.echo(
+                typer.style("  Failed instructions:", fg=typer.colors.RED, bold=True)
+            )
+            for r in failed_results[:10]:
+                typer.echo(
+                    f"    #{r.get('index', r.get('instruction_index', '?')):>4}  "
+                    f"offset {r.get('offset_expected_hex', r.get('offset', '?'))}  "
+                    f"— {r.get('message', r.get('reason', 'ob not found at offset'))}"
+                )
+            if len(failed_results) > 10:
+                typer.echo(
+                    typer.style(
+                        f"    … and {len(failed_results) - 10} more. "
+                        "Use --json for the full report.",
+                        dim=True,
+                    )
+                )
+
+        typer.echo("")
+        typer.echo(
+            typer.style(
+                "  Tip: run  openremap validate check  to find out why.",
+                dim=True,
+            )
+        )
+
     typer.echo("")
 
     if failed:
         raise typer.Exit(code=1)
 
 
-# ---------------------------------------------------------------------------
-# exists
-# ---------------------------------------------------------------------------
-
-
-@app.command()
-def exists(
-    target: Path = typer.Argument(
-        ...,
-        help="The target ECU binary to search (.bin or .ori).",
-        exists=True,
-        file_okay=True,
-        dir_okay=False,
-        readable=True,
-        resolve_path=True,
-    ),
-    recipe: Path = typer.Argument(
-        ...,
-        help="The recipe .json file to validate against.",
-        exists=True,
-        file_okay=True,
-        dir_okay=False,
-        readable=True,
-        resolve_path=True,
-    ),
-    as_json: bool = typer.Option(
-        False,
-        "--json",
-        help="Output the full validation report as JSON.",
-    ),
-    output: Optional[Path] = typer.Option(
-        None,
-        "--output",
-        "-o",
-        help="Save the report to a file instead of printing to stdout.",
-        resolve_path=True,
-    ),
+def _run_check(
+    target: Path,
+    recipe: Path,
+    as_json: bool,
+    output: Optional[Path],
 ) -> None:
-    """
-    Existence validation — search the entire binary for ob bytes.
-
-    Scans the whole binary for the original bytes (ob) of every instruction
-    and classifies each as EXACT, SHIFTED, or MISSING.
-
-    Run this after a strict validation failure to understand why it failed:
-    SHIFTED means a SW revision moved the map — the patch may still be recoverable.
-    MISSING means the ob bytes are nowhere in the binary — this is the wrong ECU.
-    """
+    """Core logic for 'validate check' (whole-binary existence scan)."""
     target_data = _read_bin(target, "Target")
     recipe_dict = _read_recipe(recipe)
 
@@ -348,7 +306,7 @@ def exists(
     except Exception as exc:
         typer.echo(
             typer.style(
-                f"\n  Error: existence validation failed — {exc}",
+                f"\n  Error: existence check failed — {exc}",
                 fg=typer.colors.RED,
                 bold=True,
             ),
@@ -447,56 +405,13 @@ def exists(
         raise typer.Exit(code=1)
 
 
-# ---------------------------------------------------------------------------
-# tuned
-# ---------------------------------------------------------------------------
-
-
-@app.command(name="tuned")
-def tuned(
-    patched_file: Path = typer.Argument(
-        ...,
-        help="The tuned ECU binary to verify (.bin or .ori).",
-        exists=True,
-        file_okay=True,
-        dir_okay=False,
-        readable=True,
-        resolve_path=True,
-        metavar="TUNED",
-    ),
-    recipe: Path = typer.Argument(
-        ...,
-        help="The recipe .json file used during patching.",
-        exists=True,
-        file_okay=True,
-        dir_okay=False,
-        readable=True,
-        resolve_path=True,
-    ),
-    as_json: bool = typer.Option(
-        False,
-        "--json",
-        help="Output the full verification report as JSON.",
-    ),
-    output: Optional[Path] = typer.Option(
-        None,
-        "--output",
-        "-o",
-        help="Save the report to a file instead of printing to stdout.",
-        resolve_path=True,
-    ),
+def _run_after(
+    patched_file: Path,
+    recipe: Path,
+    as_json: bool,
+    output: Optional[Path],
 ) -> None:
-    """
-    Post-tune verification — confirm mb bytes were written correctly.
-
-    Reads the exact offset of every instruction in a tuned binary and
-    confirms that the modified bytes (mb) are now present there.
-
-    This is the mirror image of 'validate strict': strict checks ob bytes
-    before tuning; this command checks mb bytes after tuning.
-
-    Returns patch_confirmed=true only when every instruction passes.
-    """
+    """Core logic for 'validate after' (post-tune byte confirmation)."""
     patched_data = _read_bin(patched_file, "Tuned")
     recipe_dict = _read_recipe(recipe)
 
@@ -596,3 +511,255 @@ def tuned(
 
     if not confirmed:
         raise typer.Exit(code=1)
+
+
+# ---------------------------------------------------------------------------
+# Primary commands
+# ---------------------------------------------------------------------------
+
+
+@app.command(name="before")
+def before(
+    target: Path = typer.Argument(
+        ...,
+        help="The untuned ECU binary to validate (.bin or .ori).",
+        exists=True,
+        file_okay=True,
+        dir_okay=False,
+        readable=True,
+        resolve_path=True,
+    ),
+    recipe: Path = typer.Argument(
+        ...,
+        help="The recipe .json file to validate against.",
+        exists=True,
+        file_okay=True,
+        dir_okay=False,
+        readable=True,
+        resolve_path=True,
+    ),
+    as_json: bool = typer.Option(
+        False,
+        "--json",
+        help="Output the full validation report as JSON.",
+    ),
+    output: Optional[Path] = typer.Option(
+        None,
+        "--output",
+        "-o",
+        help="Save the report to a file instead of printing to stdout.",
+        resolve_path=True,
+    ),
+) -> None:
+    """
+    Pre-flight check — verify ob bytes are at every recorded offset.
+
+    Reads the exact offset of every recipe instruction and compares the
+    original bytes (ob) against what is present in the binary.  All
+    instructions are checked before reporting.
+
+    A result of 'Safe to tune' means every instruction matched and it is
+    safe to run 'openremap tune'.
+
+    Run 'openremap validate check' if this fails — it will tell you whether
+    the bytes exist elsewhere (shifted SW revision) or not at all (wrong ECU).
+    """
+    _run_before(target, recipe, as_json, output)
+
+
+@app.command(name="check")
+def check(
+    target: Path = typer.Argument(
+        ...,
+        help="The target ECU binary to search (.bin or .ori).",
+        exists=True,
+        file_okay=True,
+        dir_okay=False,
+        readable=True,
+        resolve_path=True,
+    ),
+    recipe: Path = typer.Argument(
+        ...,
+        help="The recipe .json file to validate against.",
+        exists=True,
+        file_okay=True,
+        dir_okay=False,
+        readable=True,
+        resolve_path=True,
+    ),
+    as_json: bool = typer.Option(
+        False,
+        "--json",
+        help="Output the full validation report as JSON.",
+    ),
+    output: Optional[Path] = typer.Option(
+        None,
+        "--output",
+        "-o",
+        help="Save the report to a file instead of printing to stdout.",
+        resolve_path=True,
+    ),
+) -> None:
+    """
+    Diagnostic — search the entire binary for ob bytes.
+
+    Scans the whole binary for the original bytes (ob) of every instruction
+    and classifies each as EXACT, SHIFTED, or MISSING.
+
+    Run this after 'validate before' fails to understand why:
+      SHIFTED  — bytes exist but at a different offset; likely a SW revision
+                 difference. 'openremap tune' may still recover them via its
+                 ±2 KB anchor search.
+      MISSING  — bytes are nowhere in the binary. This is the wrong ECU.
+    """
+    _run_check(target, recipe, as_json, output)
+
+
+@app.command(name="after")
+def after(
+    patched_file: Path = typer.Argument(
+        ...,
+        help="The tuned ECU binary to verify (.bin or .ori).",
+        exists=True,
+        file_okay=True,
+        dir_okay=False,
+        readable=True,
+        resolve_path=True,
+        metavar="TUNED",
+    ),
+    recipe: Path = typer.Argument(
+        ...,
+        help="The recipe .json file used during tuning.",
+        exists=True,
+        file_okay=True,
+        dir_okay=False,
+        readable=True,
+        resolve_path=True,
+    ),
+    as_json: bool = typer.Option(
+        False,
+        "--json",
+        help="Output the full verification report as JSON.",
+    ),
+    output: Optional[Path] = typer.Option(
+        None,
+        "--output",
+        "-o",
+        help="Save the report to a file instead of printing to stdout.",
+        resolve_path=True,
+    ),
+) -> None:
+    """
+    Post-tune confirmation — verify mb bytes were written correctly.
+
+    Reads the exact offset of every instruction in the tuned binary and
+    confirms that the modified bytes (mb) are now present there.
+
+    The mirror image of 'validate before': before checks ob bytes before
+    tuning; after checks mb bytes after tuning.
+
+    Returns confirmed=true only when every instruction passes.
+    """
+    _run_after(patched_file, recipe, as_json, output)
+
+
+# ---------------------------------------------------------------------------
+# Deprecated aliases (hidden from --help, kept for backward compatibility)
+# ---------------------------------------------------------------------------
+
+
+@app.command(name="strict", hidden=True)
+def strict(
+    target: Path = typer.Argument(
+        ...,
+        exists=True,
+        file_okay=True,
+        dir_okay=False,
+        readable=True,
+        resolve_path=True,
+    ),
+    recipe: Path = typer.Argument(
+        ...,
+        exists=True,
+        file_okay=True,
+        dir_okay=False,
+        readable=True,
+        resolve_path=True,
+    ),
+    as_json: bool = typer.Option(False, "--json"),
+    output: Optional[Path] = typer.Option(None, "--output", "-o", resolve_path=True),
+) -> None:
+    """[Deprecated] Use 'validate before' instead."""
+    typer.echo(
+        typer.style(
+            "  Note: 'validate strict' has been renamed to 'validate before'.",
+            fg=typer.colors.YELLOW,
+            dim=True,
+        )
+    )
+    _run_before(target, recipe, as_json, output)
+
+
+@app.command(name="exists", hidden=True)
+def exists(
+    target: Path = typer.Argument(
+        ...,
+        exists=True,
+        file_okay=True,
+        dir_okay=False,
+        readable=True,
+        resolve_path=True,
+    ),
+    recipe: Path = typer.Argument(
+        ...,
+        exists=True,
+        file_okay=True,
+        dir_okay=False,
+        readable=True,
+        resolve_path=True,
+    ),
+    as_json: bool = typer.Option(False, "--json"),
+    output: Optional[Path] = typer.Option(None, "--output", "-o", resolve_path=True),
+) -> None:
+    """[Deprecated] Use 'validate check' instead."""
+    typer.echo(
+        typer.style(
+            "  Note: 'validate exists' has been renamed to 'validate check'.",
+            fg=typer.colors.YELLOW,
+            dim=True,
+        )
+    )
+    _run_check(target, recipe, as_json, output)
+
+
+@app.command(name="tuned", hidden=True)
+def tuned(
+    patched_file: Path = typer.Argument(
+        ...,
+        exists=True,
+        file_okay=True,
+        dir_okay=False,
+        readable=True,
+        resolve_path=True,
+        metavar="TUNED",
+    ),
+    recipe: Path = typer.Argument(
+        ...,
+        exists=True,
+        file_okay=True,
+        dir_okay=False,
+        readable=True,
+        resolve_path=True,
+    ),
+    as_json: bool = typer.Option(False, "--json"),
+    output: Optional[Path] = typer.Option(None, "--output", "-o", resolve_path=True),
+) -> None:
+    """[Deprecated] Use 'validate after' instead."""
+    typer.echo(
+        typer.style(
+            "  Note: 'validate tuned' has been renamed to 'validate after'.",
+            fg=typer.colors.YELLOW,
+            dim=True,
+        )
+    )
+    _run_after(patched_file, recipe, as_json, output)

@@ -7,6 +7,7 @@ Examples:
     openremap identify ecu.bin
     openremap identify ecu.bin --json
     openremap identify ecu.bin --json --output result.json
+    openremap identify ecu.rom       # non-.bin/.ori extensions accepted with a warning
 """
 
 from __future__ import annotations
@@ -142,13 +143,12 @@ def identify(
     if suffix not in (".bin", ".ori"):
         typer.echo(
             typer.style(
-                f"Error: '{file.name}' is not a .bin or .ori file.",
-                fg=typer.colors.RED,
-                bold=True,
+                f"  ⚠  Unrecognised extension '{file.suffix}' — proceeding anyway. "
+                "Expected .bin or .ori.",
+                fg=typer.colors.YELLOW,
             ),
             err=True,
         )
-        raise typer.Exit(code=1)
 
     try:
         data = file.read_bytes()

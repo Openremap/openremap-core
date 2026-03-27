@@ -1,9 +1,11 @@
 # `openremap validate`
 
 Three sub-commands for checking a binary against a recipe — before and after
-tuning. Run `validate strict` before you tune anything. Run `validate tuned`
-after. Use `validate exists` only when `validate strict` fails and you need
-to understand why.
+tuning. In most cases you do not need to run these individually: `openremap tune`
+runs `validate before` and `validate after` automatically as Phase 1 and Phase 3.
+
+Use these commands when you need to inspect a specific phase in isolation, save
+an individual report, or diagnose a failure that `tune` reported.
 
 ---
 
@@ -11,28 +13,31 @@ to understand why.
 
 | Sub-command | When to run | What it checks |
 |---|---|---|
-| [`strict`](#strict) | **Before** tuning | Are the original bytes at the exact expected offsets? |
-| [`exists`](#exists) | When `strict` fails | Are the original bytes anywhere in the binary at all? |
-| [`tuned`](#tuned) | **After** tuning | Are the new bytes now at the correct offsets? |
+| [`before`](#before) | When you need Phase 1 in isolation | Are the original bytes at the exact expected offsets? |
+| [`check`](#check) | When `before` fails (or Phase 1 of `tune` fails) | Are the original bytes anywhere in the binary at all? |
+| [`after`](#after) | When you need Phase 3 in isolation | Are the new bytes now at the correct offsets? |
+
+> **Deprecated names** — `validate strict`, `validate exists`, and `validate tuned`
+> still work but print a deprecation notice. Use the new names going forward.
 
 ---
 
-## `strict`
+## `before`
 
-**Run this before applying a tune.**
+**The pre-flight safety check.**
 
 Checks that the exact original bytes (`ob`) from every instruction in the
 recipe are present at their expected offsets in the target binary. Every
 instruction is checked before reporting — you see the full picture, not just
 the first failure.
 
-A result of `Safe to tune` means every instruction matched and it is safe to
-call `openremap tune`.
+A result of `Safe to tune` means every instruction matched. `openremap tune`
+runs this check automatically as Phase 1 before writing anything.
 
 ### Usage
 
 ```bash
-openremap validate strict <TARGET> <RECIPE> [OPTIONS]
+openremap validate before <TARGET> <RECIPE> [OPTIONS]
 ```
 
 ### Arguments
@@ -54,10 +59,10 @@ openremap validate strict <TARGET> <RECIPE> [OPTIONS]
 
 ```bash
 # Run the check and print the result
-openremap validate strict target.bin recipe.json
+openremap validate before target.bin recipe.json
 
 # Save the full JSON report to a file
-openremap validate strict target.bin recipe.json --json --output report.json
+openremap validate before target.bin recipe.json --json --output before_report.json
 ```
 
 ### Example output
@@ -84,7 +89,7 @@ openremap validate strict target.bin recipe.json --json --output report.json
      recipe : EDC17C66::1037541778126241V0
      target : EDC17C66::1037541778999999V0
 
-  ❌ Not safe to tune
+  ❌ NOT safe to tune
 
   Target               target.bin
   MD5                  ff3a91b2...
@@ -95,22 +100,24 @@ openremap validate strict target.bin recipe.json --json --output report.json
   Failed instructions:
      #  12  offset 0x0012A4F0  — ob not found at offset
      #  13  offset 0x0012A510  — ob not found at offset
-     ...
+     …
+
+  Tip: run  openremap validate check  to find out why.
 ```
 
 ### What to look for
 
 | Result | What to do |
 |---|---|
-| `Safe to tune` — all passed | Proceed to `openremap tune`. |
-| Any failures | Stop. Do NOT tune. Run `validate exists` to find out why. |
-| `match_key mismatch` warning | The target binary is a different software version from the one the recipe was built on. Run `validate exists` before deciding whether to continue. |
+| `Safe to tune` — all passed | Run `openremap tune` (or proceed to Phase 2 manually). |
+| Any failures | Stop. Run `validate check` to find out whether the bytes are shifted or missing. |
+| `match_key mismatch` warning | The target is a different software version from the recipe source. Run `validate check` before deciding whether to continue. |
 
 ---
 
-## `exists`
+## `check`
 
-**Run this when `validate strict` fails.**
+**The diagnostic tool — run this when `before` (or Phase 1 of `tune`) fails.**
 
 Searches the entire binary for the original bytes (`ob`) of every instruction
 — not just at the expected offset. This tells you whether the bytes exist
@@ -118,13 +125,12 @@ somewhere else in the file (meaning the maps have shifted, likely due to a
 different software revision) or are absent entirely (meaning this is the
 wrong ECU).
 
-This command does not move or modify any file. It is purely a diagnostic
-tool.
+This command never modifies any file. It is purely a diagnostic tool.
 
 ### Usage
 
 ```bash
-openremap validate exists <TARGET> <RECIPE> [OPTIONS]
+openremap validate check <TARGET> <RECIPE> [OPTIONS]
 ```
 
 ### Arguments
@@ -146,54 +152,58 @@ openremap validate exists <TARGET> <RECIPE> [OPTIONS]
 
 ```bash
 # Run the existence check
-openremap validate exists target.bin recipe.json
+openremap validate check target.bin recipe.json
 
-# Save the report
-openremap validate exists target.bin recipe.json --json --output exists_report.json
+# Save the report for further analysis
+openremap validate check target.bin recipe.json --json --output check_report.json
 ```
 
 ### Verdicts
 
 | Verdict | What it means | What to do |
 |---|---|---|
-| `SAFE EXACT` | All `ob` bytes found at their exact expected offsets. | Re-examine why `validate strict` failed — this is unusual. |
-| `SHIFTED RECOVERABLE` | All `ob` bytes found, but at different offsets from those recorded in the recipe. | The target is a different software revision. The tuner's ±2 KB anchor search may still recover these automatically — proceed with caution and verify the result carefully. |
+| `SAFE EXACT` | All `ob` bytes found at their exact expected offsets. | Re-examine why `validate before` failed — this is unusual. |
+| `SHIFTED RECOVERABLE` | All `ob` bytes found, but at different offsets from those in the recipe. | The target is a different SW revision. `openremap tune`'s ±2 KB anchor search may still recover these — proceed with caution and verify carefully. |
 | `MISSING UNRECOVERABLE` | Some `ob` bytes are not found anywhere in the binary. | This is the wrong ECU. Do not tune. |
 
 ### Example output
 
 ```
-  Checking existence of ob bytes in target.bin against recipe.json …
+  Searching target.bin for all recipe instructions …
 
   Verdict: SHIFTED RECOVERABLE
 
-  Instructions checked   277
-  Found at exact offset  261
-  Found shifted            16
-  Not found                 0
+  Target               target.bin
+  MD5                  ff3a91b2...
+  Instructions         277
+  Exact                261
+  Shifted               16
+  Missing                0
 
-  Shifted instructions (sample):
-     # 12  expected 0x0012A4F0  found at 0x0012B4F0  (shifted +4096 bytes)
-     # 13  expected 0x0012A510  found at 0x0012B510  (shifted +4096 bytes)
+  Shifted instructions:
+     # 12  expected 0x0012A4F0  →  found at shift +4096
+     # 13  expected 0x0012A510  →  found at shift +4096
 ```
 
 ---
 
-## `tuned`
+## `after`
 
-**Run this after applying a tune.**
+**The post-tune confirmation.**
 
 Confirms that every instruction's new bytes (`mb`) are now present at the
-correct offset in the tuned binary. The mirror image of `validate strict`:
-`strict` checks the original bytes (`ob`) before tuning; `tuned` checks the
+correct offset in the tuned binary. The mirror image of `validate before`:
+`before` checks the original bytes (`ob`) before tuning; `after` checks the
 modified bytes (`mb`) after.
 
-A result of `Tune confirmed` means every instruction was written correctly.
+`openremap tune` runs this automatically as Phase 3 immediately after applying
+the recipe. Run it manually when you want an independent confirmation report,
+or when you need to verify a binary that was tuned outside of `openremap tune`.
 
 ### Usage
 
 ```bash
-openremap validate tuned <TUNED> <RECIPE> [OPTIONS]
+openremap validate after <TUNED> <RECIPE> [OPTIONS]
 ```
 
 ### Arguments
@@ -215,10 +225,10 @@ openremap validate tuned <TUNED> <RECIPE> [OPTIONS]
 
 ```bash
 # Verify the tuned binary
-openremap validate tuned target_tuned.bin recipe.json
+openremap validate after target_tuned.bin recipe.json
 
 # Save the verification report for your records
-openremap validate tuned target_tuned.bin recipe.json --json --output verify.json
+openremap validate after target_tuned.bin recipe.json --json --output verify.json
 ```
 
 ### Example output
@@ -258,34 +268,47 @@ openremap validate tuned target_tuned.bin recipe.json --json --output verify.jso
 | Result | What to do |
 |---|---|
 | `Tune confirmed` — all passed | The tune was written correctly. Proceed to checksum correction before flashing. |
-| Any failures | Do not flash. Re-run `openremap tune` or investigate with `validate exists`. |
+| Any failures | Do not flash. Re-run `openremap tune` or investigate with `validate check`. |
 
 ---
 
-## The full validation sequence
+## When to use each command
 
 ```bash
-# 1. Before tuning — must pass before you proceed
-openremap validate strict target.bin recipe.json
+# Normal workflow — tune does all three phases automatically
+openremap tune target.bin recipe.json
 
-# 2. If strict fails — diagnose first
-openremap validate exists target.bin recipe.json
+# Diagnose a Phase 1 failure reported by tune
+openremap validate check target.bin recipe.json
 
-# 3. After tuning — confirm everything landed correctly
-openremap validate tuned target_tuned.bin recipe.json
+# Run phases individually with saved reports
+openremap validate before target.bin recipe.json --json --output p1.json
+openremap validate after  target_tuned.bin recipe.json --json --output p3.json
 ```
+
+---
+
+## Deprecated aliases
+
+The old sub-command names still work but print a yellow deprecation notice:
+
+| Old name | New name |
+|---|---|
+| `validate strict` | `validate before` |
+| `validate exists` | `validate check` |
+| `validate tuned` | `validate after` |
 
 ---
 
 ## Notes
 
 - All three `validate` commands are read-only. They never modify any file.
-- The `--json` flag outputs the raw validation report, which includes every
-  instruction result individually. Useful for scripting or archiving.
-- `validate strict` is also run automatically inside `openremap tune` before
-  any bytes are written. Passing `--skip-validation` to `tune` bypasses this
-  — only do so if you have already run `validate strict` manually and are
-  certain the target is correct.
+- The `--json` flag outputs the raw validation report including every
+  instruction result individually. Useful for scripting, CI, or archiving.
+- `validate before` is also run automatically inside `openremap tune` as Phase 1
+  before any bytes are written. `validate after` runs as Phase 3 immediately
+  after the recipe is applied. Pass `--skip-validation` to `tune` to bypass
+  both — only do so in scripted pipelines where you have validated separately.
 
 ---
 

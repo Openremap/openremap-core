@@ -50,7 +50,7 @@ Detection — primary path (all originally-known bins):
     and strongest positive anchor.  It is unique to M1.x and absent from every
     other known Bosch family.
 
-Detection — fallback path (BMW M1.7 bins without the standard header magic):
+Detection — fallback path (BMW M1.7 and Opel M1.x bins without the standard header magic):
 
     A subset of BMW M1.7 bins (observed: E36 318i 1.8i 0261200520, E36 318is
     0261203590 32KB, E36 316 0261203660 64KB) do NOT have the \x85\x0a\xf0\x30
@@ -63,9 +63,12 @@ Detection — fallback path (BMW M1.7 bins without the standard header magic):
         correctly from the standard ident region (or, for the 64KB variant,
         from the last 4KB with a small FF-byte gap between the two digit runs).
 
-    The fallback is gated tightly: it fires ONLY when all four of the above
-    conditions hold simultaneously.  No scanned bin from any other family
-    satisfies them, so regression risk is zero.
+    The BMW fallback (Phase 2b) fires when all three of the above conditions
+    hold simultaneously.  Opel M1.x petrol ECUs (Phase 2c) use the identical
+    reversed-digit ident encoding but carry no ROM header magic AND no BMW
+    family marker; they are also accepted when the file is exactly 32KB or 64KB
+    and the ident decodes to the 0261/1267 prefixes that uniquely identify
+    Bosch M1.x petrol ECUs regardless of manufacturer.
 
 64KB variant — split ident:
 
@@ -153,6 +156,8 @@ EXCLUSION_SIGNATURES: list[bytes] = [
     b"MOTRONIC",
     b"1350000M3",  # M3.1 family marker
     b"1530000M3",  # M3.3 family marker
+    b"0000000M3",  # M3.x PSA family marker (MP3.2, MP3.x-PSA — Citroën ZX etc.)
+    b'"0000000M2',  # M2.x family marker (M2.3, M2.7, M2.8, M2.81, M2.9)
 ]
 
 # ---------------------------------------------------------------------------
@@ -235,7 +240,7 @@ class BoschM1xExtractor(BaseManufacturerExtractor):
         """
         Return True if this binary is a Bosch Motronic M1.x ECU.
 
-        Three-phase check:
+        Multi-phase check (Phase 1, 2a, 2b, 2c):
 
           Phase 1 — Exclusion.
             Reject immediately if any exclusion signature is found in the
@@ -247,21 +252,23 @@ class BoschM1xExtractor(BaseManufacturerExtractor):
             offset 0.  This is the strongest possible anchor — exclusive to
             M1.x and absent from every other known Bosch family.
 
-          Phase 2b — Fallback: family marker + size gate + valid ident.
+          Phase 2b — BMW M1.7 fallback: family marker present, no header magic.
             A subset of BMW M1.7 32KB/64KB bins lack the standard header
-            magic.  Accept them when ALL of the following hold:
+            magic but carry the '"0000000M1.7' or '"0000000M1.3' family
+            marker.  Accepted when the file is 32KB or 64KB and a valid
+            reversed-digit ident (hw starts with '0261', sw starts with
+            '1267') decodes from IDENT_REGION (primary),
+            IDENT_REGION_64KB_TAIL (fallback for 64KB), or via the
+            gap-tolerant GAP_IDENT_PATTERN that joins two digit runs
+            separated by a small run of \\xff bytes.
 
-              (i)   File size is exactly 32KB or 64KB.
-              (ii)  The '"0000000M1.7' or '"0000000M1.3' family marker is
-                    present anywhere in the binary.
-              (iii) A valid reversed-digit ident (hw starts with '0261',
-                    sw starts with '1267') can be decoded from IDENT_REGION
-                    (primary), IDENT_REGION_64KB_TAIL (fallback for 64KB),
-                    or via the gap-tolerant GAP_IDENT_PATTERN that joins two
-                    digit runs separated by a small run of \\xff bytes.
-
-            All three conditions must hold simultaneously.  No bin from any
-            other extractor family satisfies all three.
+          Phase 2c — Opel M1.x fallback: no family marker, valid 0261/1267 ident.
+            Opel M1.x petrol ECUs use the same reversed-digit ident encoding
+            as BMW M1.x but carry neither the ROM header magic nor the BMW
+            family marker.  Accepted by the same size gate (32KB or 64KB)
+            and _fallback_ident_valid() check because hw=0261xxxxxx and
+            sw=1267xxxxxx uniquely identify M1.x petrol ECUs regardless of
+            manufacturer.
         """
         search_area = data[:0x80000]
 
@@ -274,20 +281,25 @@ class BoschM1xExtractor(BaseManufacturerExtractor):
         if data[:4] == DETECTION_MAGIC:
             return True
 
-        # Phase 2b — fallback: family marker + size gate + valid ident
-        # (i) Size gate — only 32KB and 64KB are M1.x era files
+        # Phase 2b/2c — size gate + ident fallback (BMW and Opel M1.x variants)
+        #
+        # Some BMW M1.7 bins lack the standard ROM header magic — they are still
+        # identified by the '"0000000M1.7' family marker + valid ident (Phase 2b).
+        #
+        # Opel M1.x petrol ECUs use the identical reversed-digit ident encoding
+        # but carry no ROM header magic AND no BMW family marker (Phase 2c).
+        # They are accepted by the same _fallback_ident_valid() check because that
+        # method already requires hw=0261xxxxxx and sw=1267xxxxxx, which uniquely
+        # identifies M1.x petrol ECUs regardless of manufacturer.
+        #
+        # Both variants must be exactly 32KB or 64KB in size.
         if len(data) not in FALLBACK_VALID_SIZES:
             return False
 
-        # (ii) Family marker must be present
-        if not any(marker in data for marker in FAMILY_MARKERS):
-            return False
-
-        # (iii) A valid ident must decode from at least one search region
         return self._fallback_ident_valid(data)
 
     # -----------------------------------------------------------------------
-    # Internal — fallback ident validity check (used by can_handle Phase 2b)
+    # Internal — fallback ident validity check (used by can_handle Phase 2b/2c)
     # -----------------------------------------------------------------------
 
     def _fallback_ident_valid(self, data: bytes) -> bool:

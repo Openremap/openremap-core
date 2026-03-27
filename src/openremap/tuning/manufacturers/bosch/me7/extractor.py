@@ -75,6 +75,7 @@ class BoschME7Extractor(BaseManufacturerExtractor):
             "ME7.5",
             "ME7.5.5",
             "ME7.5.10",
+            "ME7.6.2",
         ]
 
     # -----------------------------------------------------------------------
@@ -85,11 +86,20 @@ class BoschME7Extractor(BaseManufacturerExtractor):
         """
         Return True if this binary is a Bosch ME7 family ECU.
 
-        Three-phase check:
+        Six-phase check:
+          0. Reject immediately if the binary is smaller than 64KB (0x10000).
+             The ME7 ZZ ident block is anchored at offset 0x10000, so no
+             genuine ME7 binary can be smaller than this.  This size gate
+             also eliminates false positives from pre-ME7 legacy binaries
+             (e.g. Bosch M2.x Porsche 964 Carrera 2, 32KB) that happen to
+             contain the 'MOTRONIC' detection signature but are not ME7.
           1. Reject immediately if any modern Bosch (EDC17/MEDC17) exclusion
              signature is found — those belong to the BoschExtractor.
-          2. Accept if at least one ME7 string signature is found in the
-             first 512KB (ME7., ME71, ME731, MOTRONIC).
+          2. Accept if at least one ME7 string signature is found anywhere
+             in the full binary (ME7., ME71, ME731, MOTRONIC).  The search
+             is not bounded to the first 512KB because some large ME7
+             variants (e.g. ME7.6.2 for Opel Corsa D, 832KB) store the
+             family identifier past the 512KB mark.
           3. Accept if the ZZ ident block marker is present at the fixed offset
              0x10000 — checked by exact position only, never scanned across the
              full binary.  Scanning ZZ anywhere causes false positives on
@@ -102,28 +112,81 @@ class BoschME7Extractor(BaseManufacturerExtractor):
                b"ZZ\xff\xff"  — standard ME7.1 / ME7.5 / ME7.1.1 / ME7.5.5
                b"ZZ\x00\x01"  — ME731 (Alfa Romeo Motronic E7.3.1)
                b"ZZ\x01\x02"  — early/pre-production ME7 (ERCOS V2.x, 1996)
-             Anchoring on just b"ZZ" at the fixed offset is safe because no
-             other known Bosch family produces that two-byte sequence at
-             exactly 0x10000.
+             Anchoring on just b"ZZ" at the fixed offset is safe against
+             other Bosch families, but Magneti Marelli ME1.5.5 ECUs also
+             place a ZZ ident block at 0x10000 using the format
+             "ZZ43/1/ME1.5.5/..." — where the third byte is a printable
+             ASCII digit (0x34).  All genuine ME7 variants have a
+             non-printable third byte:
+               b"ZZ\xff\xff"  — standard ME7.1 / ME7.5 / ME7.1.1 / ME7.5.5
+               b"ZZ\x00\x01"  — ME731 (Alfa Romeo Motronic E7.3.1)
+               b"ZZ\x01\x02"  — early/pre-production ME7 (ERCOS V2.x, 1996)
+             The guard `not (0x20 <= byte3 <= 0x7E)` rejects the Marelli
+             format while accepting all known ME7 variants.
+          4. Accept PSA ME7 calibration sector (64KB, ZZ at offset 0).
+             Single-sector extracts from PSA (Peugeot-Citroën) ME7 ECUs
+             (e.g. Peugeot 206 1.6i) where only the calibration sector
+             starting at 0x10000 in the full dump was captured.  These
+             64KB files begin with the ZZ marker at offset 0 and contain
+             the \\xC8-prefixed HW+SW ident block.
+          5. Accept PSA ME7.4.x calibration sector (256KB, SW at 0x1A).
+             Calibration-only sector dumps from Bosch ME7.4.x PSA-variant
+             ECUs (e.g. Peugeot 207 THP 1.6 150HP) where SW is stored at
+             a fixed offset 0x1A, preceded by the record marker \\x02\\x00.
         """
-        search_area = data[:0x80000]
+        # Phase 0 — size gate: ME7 ZZ ident block lives at 0x10000, so any
+        # genuine ME7 binary must be at least 64KB.  Pre-ME7 legacy binaries
+        # (M1.x 32KB, M2.x Porsche 964 32KB, M3.x 32KB, KE-Jetronic ≤32KB)
+        # are all ≤ 32KB and cannot be ME7.  Rejecting them here prevents the
+        # 'MOTRONIC' string in their ident from triggering Phase 2 below.
+        if len(data) < ME7_ZZ_OFFSET:  # < 0x10000 = 64KB
+            return False
+
+        # Search the full binary — ME7.6.2 and other large variants place the
+        # family string past 512KB, so bounding the search would miss them.
+        # The exclusion signatures (EDC17, SB_V, Customer. …) are equally
+        # reliable as guards across the full file.
+        search_area = data
 
         # Phase 1 — reject if this is a newer Bosch family
         for excl in EXCLUSION_SIGNATURES:
             if excl in search_area:
                 return False
 
-        # Phase 2 — accept on any ME7 string signature
+        # Phase 2 — accept on any ME7 string signature (full-file scan)
         if any(sig in search_area for sig in DETECTION_SIGNATURES):
             return True
 
-        # Phase 3 — accept on ZZ prefix at its fixed ident-block offset only
-        if len(data) > ME7_ZZ_OFFSET + len(ME7_ZZ_PREFIX):
-            if (
-                data[ME7_ZZ_OFFSET : ME7_ZZ_OFFSET + len(ME7_ZZ_PREFIX)]
-                == ME7_ZZ_PREFIX
+        # Phase 3 — accept on ZZ prefix at its fixed ident-block offset only.
+        # Guard: the byte immediately after "ZZ" must be non-printable ASCII.
+        # All real ME7 variants use \xff, \x00, or \x01 at that position.
+        # Magneti Marelli ME1.5.5 ECUs also have "ZZ" at 0x10000 but follow
+        # it with printable digits ("ZZ43/1/ME1.5.5/...") — those must not
+        # be claimed here.
+        if len(data) > ME7_ZZ_OFFSET + len(ME7_ZZ_PREFIX) + 1:
+            if data[
+                ME7_ZZ_OFFSET : ME7_ZZ_OFFSET + len(ME7_ZZ_PREFIX)
+            ] == ME7_ZZ_PREFIX and not (
+                0x20 <= data[ME7_ZZ_OFFSET + len(ME7_ZZ_PREFIX)] <= 0x7E
             ):
                 return True
+
+        # Phase 4 — PSA ME7 calibration sector (64KB, ZZ at offset 0).
+        # These are single-sector dumps from PSA ME7 ECUs where the
+        # calibration sector (normally at 0x10000 in a full dump) was
+        # extracted as a standalone 64KB file.  The ZZ marker appears at
+        # offset 0 rather than 0x10000.
+        if self._is_psa_sector_64kb(data):
+            return True
+
+        # Phase 5 — PSA ME7.4.x calibration sector (256KB, SW at 0x1A).
+        # PSA-variant ME7.4 ECUs store SW at a fixed offset in 256KB
+        # calibration-only sector dumps.  Must not be M5.x/M3.8x —
+        # those also use 256KB but have MOTR + slash ident (already
+        # excluded: MOTRONIC in Phase 2, M5./M3.8 not in excl but M5x
+        # extractor picks them up via MOTR anchor and size gate).
+        if self._is_psa_sector_256kb(data):
+            return True
 
         return False
 
@@ -135,10 +198,16 @@ class BoschME7Extractor(BaseManufacturerExtractor):
         """
         Extract all identifying information from a Bosch ME7 ECU binary.
 
-        Dispatches to _extract_early() for pre-production ERCOS binaries
-        (ZZ\x01\x02 at 0x10000) and to the standard production path for
-        all other ME7 variants.  The two paths are completely separate —
-        no production resolver logic is touched by the early path.
+        Dispatches to:
+          - _extract_psa_sector_256kb() for PSA ME7.4.x 256KB sector dumps
+            (SW at fixed offset 0x1A, no ZZ, no MOTRONIC).
+          - _extract_early() for pre-production ERCOS binaries
+            (ZZ\x01\x02 at 0x10000).
+          - Standard production path for all other ME7 variants.
+
+        The PSA 64KB sector format (ZZ at offset 0) uses the standard
+        production path because hw_sw_combined in the "extended" region
+        already covers the full 64KB file and finds HW+SW correctly.
 
         Returns a dict fully compatible with ECUIdentifiersSchema.
         """
@@ -148,6 +217,12 @@ class BoschME7Extractor(BaseManufacturerExtractor):
             "md5": hashlib.md5(data).hexdigest(),
             "sha256_first_64kb": hashlib.sha256(data[:0x10000]).hexdigest(),
         }
+
+        # --- Dispatch: PSA ME7.4.x 256KB calibration sector ---
+        # Must be checked before the early ME7 path — completely different
+        # header format (no ZZ ident block, SW at 0x1A, PowerPC header).
+        if self._is_psa_sector_256kb(data):
+            return self._extract_psa_sector_256kb(data, result)
 
         # --- Dispatch: early pre-production vs standard production ---
         if self._is_early_me7(data):
@@ -164,6 +239,28 @@ class BoschME7Extractor(BaseManufacturerExtractor):
 
         # --- Step 2: Run all patterns against their assigned regions ---
         raw_hits = self._run_patterns(data)
+
+        # --- Step 2b: Full-file fallback for large / atypical ME7 binaries ---
+        # ME7.6.2 (Opel Corsa D, 832KB) and similar variants store the ident
+        # block past the normal extended search window (0x00000–0x50000).
+        # When the combined HW+SW block and the family string are both absent
+        # from the standard regions, retry with a full-file scan so these bins
+        # still yield correct hw, sw, and ecu_family values.
+        if not raw_hits.get("hw_sw_combined") and not raw_hits.get("hardware_number"):
+            full_hw_sw = [
+                m.group(0).decode("ascii", errors="ignore")
+                for m in re.finditer(PATTERNS["hw_sw_combined"], data)
+            ]
+            if full_hw_sw:
+                raw_hits["hw_sw_combined"] = full_hw_sw
+
+        if not raw_hits.get("ecu_family"):
+            full_fam = [
+                m.group(0).decode("ascii", errors="ignore")
+                for m in re.finditer(PATTERNS["ecu_family"], data)
+            ]
+            if full_fam:
+                raw_hits["ecu_family"] = full_fam
 
         # Inject raw_strings into raw_hits so resolvers can access them
         # without needing a separate parameter on every method.
@@ -201,6 +298,123 @@ class BoschME7Extractor(BaseManufacturerExtractor):
         result["match_key"] = self.build_match_key(
             ecu_family=ecu_family,
             ecu_variant=ecu_family,  # same for ME7
+            software_version=software_version,
+        )
+
+        return result
+
+    # -----------------------------------------------------------------------
+    # Internal — PSA ME7 sector detection helpers
+    # -----------------------------------------------------------------------
+
+    # Pattern for 64KB PSA ME7 calibration sector: \xC8-prefixed HW+SW block.
+    # The \xC8 byte immediately precedes the HW number in PSA sector dumps.
+    # e.g. b"\xC8 0261206942\x00 1037353507\x00"
+    _PSA_SECTOR_64KB_PAT: bytes = rb"\xc8(0261\d{6})\x00(1037\d{6})"
+
+    def _is_psa_sector_64kb(self, data: bytes) -> bool:
+        """
+        Return True if this is a 64KB PSA ME7 calibration sector extract.
+
+        These are single-sector dumps from PSA (Peugeot-Citroën) ME7 ECUs
+        (e.g. Peugeot 206 1.6i 16v, HW 0261206xxx / 0261208xxx) where only
+        the calibration sector — which sits at 0x10000 in a full dump — was
+        captured as a standalone file.
+
+        Fingerprint (all three must be true):
+          1. Size = 64KB (0x10000) exactly.
+          2. ZZ marker at offset 0x0 with non-printable third byte.
+          3. \\xC8-prefixed HW+SW pattern found anywhere in the file.
+        """
+        if len(data) != 0x10000:
+            return False
+        if data[:2] != ME7_ZZ_PREFIX:
+            return False
+        if len(data) < 3 or (0x20 <= data[2] <= 0x7E):  # third byte non-printable
+            return False
+        return bool(re.search(self._PSA_SECTOR_64KB_PAT, data))
+
+    def _is_psa_sector_256kb(self, data: bytes) -> bool:
+        """
+        Return True if this is a 256KB PSA ME7.4.x calibration sector dump.
+
+        These are calibration-only sector dumps from Bosch ME7.4.x PSA-variant
+        ECUs (e.g. Peugeot 207 THP 1.6 150HP, Bosch ME7.4.5/ME7.4.6).  The
+        file contains only calibration table data with a compact header — no
+        ZZ marker, no MOTRONIC label, no HW number.
+
+        The SW version is stored as plain ASCII at the fixed offset 0x1A,
+        preceded by the two-byte record marker \\x02\\x00 at offset 0x18.
+
+        Fingerprint (all three must be true):
+          1. Size = 256KB (0x40000) exactly.
+          2. \\x02\\x00 at offset 0x18 (record marker).
+          3. Valid 1037-prefixed 10-digit SW at offset 0x1A.
+        """
+        if len(data) != 0x40000:
+            return False
+        if data[0x18:0x1A] != b"\x02\x00":
+            return False
+        return bool(re.match(rb"1037\d{6}", data[0x1A : 0x1A + 10]))
+
+    def _extract_psa_sector_256kb(self, data: bytes, result: Dict) -> Dict:
+        """
+        Extract identifying information from a 256KB PSA ME7.4.x calibration sector.
+
+        These Bosch ME7.4.x PSA-variant binaries (e.g. Peugeot 207 THP 1.6
+        150HP) store the SW version at a fixed offset 0x1A in the file header.
+        No HW number, no slash-delimited variant string, and no MOTRONIC label
+        are present — the file is a pure calibration sector dump with a compact
+        PowerPC-style header.
+
+        Header layout (first 0x30 bytes):
+          0x00–0x0F  : PowerPC code / address words (non-printable)
+          0x10–0x17  : Additional header words
+          0x18–0x19  : Record marker \\x02\\x00
+          0x1A–0x23  : SW version ASCII "1037XXXXXX" (10 bytes)
+          0x24–…     : \\xAF fill bytes then calibration table data
+
+        Fields populated:
+          ecu_family      = "ME7"
+          ecu_variant     = "ME7"
+          software_version = 10-digit string extracted from offset 0x1A
+          hardware_number  = None (not present in this format)
+          match_key        = "ME7::1037XXXXXX"
+        """
+        ecu_family = "ME7"
+
+        result["raw_strings"] = self.extract_raw_strings(
+            data=data,
+            region=slice(0x0000, 0x0100),
+            min_length=8,
+            max_results=10,
+        )
+
+        result["ecu_family"] = ecu_family
+        result["ecu_variant"] = ecu_family
+
+        # SW version is plain ASCII at the fixed offset 0x1A.
+        sw_raw = data[0x1A : 0x1A + 10]
+        try:
+            sw_candidate = sw_raw.decode("ascii")
+            software_version = (
+                sw_candidate if re.match(r"^1037\d{6}$", sw_candidate) else None
+            )
+        except (UnicodeDecodeError, ValueError):
+            software_version = None
+
+        result["software_version"] = software_version
+        result["hardware_number"] = None
+        result["calibration_id"] = None
+        result["calibration_version"] = None
+        result["sw_base_version"] = None
+        result["serial_number"] = None
+        result["dataset_number"] = None
+        result["oem_part_number"] = None
+
+        result["match_key"] = self.build_match_key(
+            ecu_family=ecu_family,
+            ecu_variant=ecu_family,
             software_version=software_version,
         )
 

@@ -618,6 +618,28 @@ def scan(
             )
             continue
 
+        # --- Zero-byte files → trash ---
+        # An empty file cannot be an ECU binary.  Route it to trash rather
+        # than letting every extractor fail and reporting UNKNOWN.
+        if len(data) == 0:
+            actual_dest = dest[DEST_TRASH]
+            if not dry_run:
+                safe_move(filepath, actual_dest)
+            counts[DEST_TRASH] += 1
+            tag = typer.style("  TRASH      ", fg=typer.colors.RED)
+            typer.echo(f"{label_idx}{tag}{filepath.name}  (empty file)")
+            if report is not None:
+                report_rows.append(
+                    _build_report_row(
+                        filepath,
+                        ScanResult([], None, None, DEST_TRASH, "empty file"),
+                        None,
+                        None,
+                        0.0,
+                    )
+                )
+            continue
+
         # --- Classify ---
         t0 = time.perf_counter()
         result = classify_file(data, filepath.name)

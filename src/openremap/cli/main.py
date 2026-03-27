@@ -4,13 +4,17 @@ OpenRemap CLI — root entry point.
 Usage:
     openremap --help
     openremap --version
+    openremap commands
     openremap workflow
+    openremap families
+    openremap families --family EDC16
     openremap identify ecu.bin
     openremap cook stock.bin stage1.bin --output recipe.json
-    openremap validate strict target.bin recipe.json
-    openremap validate exists target.bin recipe.json
-    openremap validate tuned target_tuned.bin recipe.json
+    openremap tune target.bin recipe.json
     openremap tune target.bin recipe.json --output target_tuned.bin
+    openremap validate before target.bin recipe.json
+    openremap validate check  target.bin recipe.json
+    openremap validate after  target_tuned.bin recipe.json
     openremap scan ./my_bins/
     openremap scan ./my_bins/ --move --organize
 """
@@ -21,7 +25,9 @@ from typing import Optional
 import typer
 
 from openremap.cli.commands import validate
+from openremap.cli.commands.cmds import commands
 from openremap.cli.commands.cook import cook
+from openremap.cli.commands.families import families
 from openremap.cli.commands.identify import identify
 from openremap.cli.commands.scan import scan
 from openremap.cli.commands.tune import tune
@@ -37,7 +43,8 @@ app = typer.Typer(
         "OpenRemap — ECU binary analysis and patching toolkit.\n\n"
         "Diff, validate, and apply tuning recipes to automotive ECU binaries "
         "without a running API server.\n\n"
-        "New here? Run  openremap workflow  for a plain-English step-by-step guide."
+        "New here?  Run  openremap workflow  for a plain-English step-by-step guide.\n"
+        "Quick reminder?  Run  openremap commands  for a one-line-per-command cheat-sheet."
     ),
     no_args_is_help=True,
     pretty_exceptions_enable=True,
@@ -73,10 +80,15 @@ def _callback(
 # Commands
 # ---------------------------------------------------------------------------
 
-# workflow, identify, cook, tune, and scan are single-action commands —
-# registered directly to avoid the Typer 0.12+ regression where
+# workflow, identify, cook, tune, scan, families, and commands are single-action
+# commands — registered directly to avoid the Typer 0.12+ regression where
 # @app.callback(invoke_without_command=True) with typer.Argument parameters
 # fails when added via add_typer().
+
+app.command(
+    name="commands",
+    help="Print a one-line-per-command cheat-sheet of every available command.",
+)(commands)
 
 app.command(
     name="workflow",
@@ -86,6 +98,14 @@ app.command(
         "Start here if you are new to OpenRemap or the terminal."
     ),
 )(workflow)
+
+app.command(
+    name="families",
+    help=(
+        "List all supported ECU families with era, file size, and notes. "
+        "Use --family <NAME> for full detail on a specific family."
+    ),
+)(families)
 
 app.command(
     name="identify",
@@ -99,16 +119,16 @@ app.command(
     no_args_is_help=True,
 )(cook)
 
-# validate has real sub-commands (strict / exists / tuned) and uses
+# validate has real sub-commands (before / check / after) and uses
 # @app.command() internally — add_typer works correctly for it.
 app.add_typer(validate.app, name="validate")
 
 app.command(
     name="tune",
     help=(
-        "Apply a tuning recipe to a target ECU binary. "
-        "Runs strict pre-flight validation before writing anything. "
-        "The original file is never modified — the tuned result is written separately."
+        "One-shot: validate before → apply recipe → validate after. "
+        "The original file is never modified — the tuned result is written separately. "
+        "Run  openremap validate check  if Phase 1 fails to diagnose why."
     ),
     no_args_is_help=True,
 )(tune)

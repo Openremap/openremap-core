@@ -113,6 +113,7 @@ def workflow() -> None:
     Designed for users who are new to OpenRemap or to the terminal.
     Run  openremap <command> --help  at any time for the full options of any
     individual command.
+    Run  openremap commands  for a compact one-line-per-command cheat-sheet.
     """
 
     # ── Header ───────────────────────────────────────────────────────────────
@@ -122,6 +123,8 @@ def workflow() -> None:
     _body(
         "A complete walkthrough from raw binary to verified patched file.",
         "Run  openremap <command> --help  at any time for full options.",
+        "Run  openremap commands           for a compact command cheat-sheet.",
+        "Run  openremap families           to see every supported ECU family.",
     )
     _sep()
 
@@ -136,9 +139,15 @@ def workflow() -> None:
         "Why:   If you collected binaries from multiple sources and they are",
         "       all in one flat folder, this step tidies them up before you",
         "       start working on any individual file.",
+        "",
+        "Tip:   Not sure if your ECU is supported? Run  openremap families",
+        "       to see every supported family with era, size, and vehicle notes.",
+        "       Use  openremap families --family EDC16  for full detail on one.",
     )
     _blank()
     _cmd(
+        "openremap families                           # list all supported ECU families",
+        "openremap families --family EDC16            # detail for one family",
         "openremap scan ./my_bins/                    # preview — nothing moves",
         "openremap scan ./my_bins/ --move --organize  # sort into Bosch/EDC17/ etc.",
     )
@@ -149,7 +158,7 @@ def workflow() -> None:
     _fail("Files in  contested/  matched more than one extractor — investigate.")
     _note("Run  openremap identify <file>  and check which result looks correct.")
     _fail("Files in  unknown/  are not supported yet or are not ECU binaries.")
-    _note("See CONTRIBUTING.md to add support for a new ECU family.")
+    _note("Run  openremap families  to check if the ECU family is supported.")
 
     # ── STEP 1 — Identify ─────────────────────────────────────────────────────
     _step("1", "Identify your stock binary")
@@ -195,83 +204,79 @@ def workflow() -> None:
     _fail("A read error — check that both paths exist and end in .bin or .ori.")
 
     # ── STEP 3 — Validate strict ──────────────────────────────────────────────
-    _step("3", "Validate the target before patching")
+    _step("3", "Apply the recipe  (validate → apply → verify in one shot)")
 
     _body(
-        "What:  Check that the exact original bytes from the recipe are",
-        "       present at their expected offsets in your target binary.",
+        "What:  openremap tune runs three phases automatically:",
+        "         Phase 1 — validate before : checks that the original bytes",
+        "                   from the recipe are at their expected offsets.",
+        "         Phase 2 — apply           : writes the tuned bytes with a",
+        "                   ±2 KB anchor search for shifted maps.",
+        "         Phase 3 — validate after  : confirms every tuned byte was",
+        "                   written correctly.",
         "",
-        "Why:   This is your safety net. It confirms the target ECU matches",
-        "       the one the recipe was built for before a single byte is",
-        "       written. Do not skip this step.",
+        "Why:   One command does the full safe workflow. The original file is",
+        "       never modified — the tuned result is written separately.",
+        "       Nothing is written unless all three phases pass.",
     )
     _blank()
-    _cmd("openremap validate strict target.bin recipe.json")
+    _cmd(
+        "openremap tune target.bin recipe.json",
+        "openremap tune target.bin recipe.json --output my_tuned.bin",
+        "openremap tune target.bin recipe.json --report tune_report.json",
+    )
     _what_to_look_for()
-    _ok('"Safe to patch" and all instructions passed — proceed to Step 4.')
-    _fail("Any failed instructions — stop. Do NOT proceed to patching.")
-    _note("Run the command below to find out why:")
-    _note("  openremap validate exists target.bin recipe.json")
+    _ok('"Tune complete" with all three phases green — file is ready for checksum.')
+    _ok('"Shifted" count in Phase 2 — maps recovered via ±2 KB anchor search.')
+    _note("Verify the shifted instructions carefully before flashing.")
+    _fail("Phase 1 fails — target does not match the recipe.")
+    _note("Run the command below to diagnose why:")
+    _note("  openremap validate check target.bin recipe.json")
     _note("")
-    _note("  SAFE EXACT   → bytes at exact offsets (re-check why strict failed).")
-    _note("  SHIFTED      → bytes present but at a different offset.")
-    _note("                 Likely a different SW revision. The patcher's ±2 KB")
-    _note("                 anchor search may still recover them — proceed with care.")
-    _note("  MISSING      → bytes not found anywhere in the binary.")
-    _note("                 This is the wrong ECU. Do not attempt to patch.")
+    _note("  EXACT    → bytes at exact offsets (unusual — re-check the file).")
+    _note("  SHIFTED  → bytes at a different offset (different SW revision).")
+    _note("             tune may still recover them via its ±2 KB anchor search.")
+    _note("  MISSING  → bytes not found anywhere. This is the wrong ECU.")
     _fail('"match_key mismatch" warning — the target is a different SW version.')
-    _note("Run  validate exists  and review the verdict before deciding to continue.")
+    _note("Run  openremap validate check  and review the verdict before continuing.")
+    _fail("Phase 2 or Phase 3 fails — do not flash the output binary.")
+    _note("Run  openremap validate check target.bin recipe.json  to diagnose.")
 
-    # ── STEP 4 — Patch ────────────────────────────────────────────────────────
-    _step("4", "Apply the recipe")
-
-    _body(
-        "What:  Write the tuned bytes to the target binary. The patcher runs",
-        "       strict validation internally before writing anything — if",
-        "       validation fails, nothing is written and the original file",
-        "       is untouched.",
-        "",
-        "Why:   Applies the recipe byte-by-byte with a full audit trail.",
-        "       A ±2 KB anchor search automatically recovers instructions",
-        "       whose offsets have shifted slightly between SW revisions.",
-    )
-    _blank()
-    _cmd("openremap tune target.bin recipe.json --output target_tuned.bin")
-    _what_to_look_for()
-    _ok('"Tune applied successfully" — all instructions written.')
-    _ok('"Applied (shifted)" count — those instructions were found at a nearby')
-    _note("offset and recovered automatically. Verify carefully before flashing.")
-    _fail('Any "Failed" count — do not flash the output binary.')
-    _note("Run  openremap validate exists target.bin recipe.json  to diagnose.")
-    _fail('"Tune rejected during pre-flight validation" — see Step 3 output.')
-
-    # ── STEP 5 — Verify ───────────────────────────────────────────────────────
-    _step("5", "Verify the tuned binary")
+    # ── STEP 4 — Validate individually (advanced / when tune fails) ───────────
+    _step("4", "Validate individually  (advanced — only when Step 3 fails)")
 
     _body(
-        "What:  Confirm that every instruction's tuned bytes (mb) are now",
-        "       present at the correct offset in the patched binary.",
+        "What:  The three validate sub-commands let you run each phase of",
+        "       openremap tune individually for detailed diagnostics.",
         "",
-        "Why:   Gives you an independent, final confirmation that the patch",
-        "       was written correctly before the file goes anywhere near a",
-        "       vehicle.",
+        "       validate before  — same as Phase 1 of tune (pre-flight check).",
+        "       validate check   — whole-binary search; run when before fails.",
+        "       validate after   — same as Phase 3 of tune (post-tune confirm).",
+        "",
+        "Why:   Use these when you need to inspect a specific phase in isolation,",
+        "       save an individual JSON report, or diagnose a failure.",
     )
     _blank()
-    _cmd("openremap validate tuned target_tuned.bin recipe.json")
+    _cmd(
+        "openremap validate before target.bin recipe.json",
+        "openremap validate check  target.bin recipe.json",
+        "openremap validate after  target_tuned.bin recipe.json",
+        "openremap validate after  target_tuned.bin recipe.json --json --output verify.json",
+    )
     _what_to_look_for()
-    _ok("All instructions passed — the tune was written correctly.")
-    _fail("Any failures — do not flash. Re-run from Step 4 or investigate.")
-    _note("Save the report for your records:")
-    _note("  openremap validate tuned target_tuned.bin recipe.json \\")
-    _note("            --json --output verify_report.json")
+    _ok('"Safe to tune" from validate before — Phase 1 would pass inside tune.')
+    _ok('"Tune confirmed" from validate after — every byte written correctly.')
+    _fail('"MISSING" verdict from validate check — this is the wrong ECU.')
+    _fail('"SHIFTED" verdict from validate check — SW revision mismatch.')
+    _note("tune will still attempt recovery via its ±2 KB anchor search.")
 
-    # ── STEP 6 — Checksum (MANDATORY) ─────────────────────────────────────────
+    # ── STEP 5 — Checksum (MANDATORY) ─────────────────────────────────────────
     _blank()
     _sep()
     _blank()
     typer.echo(
         typer.style(
-            "  ⚠  STEP 6 — MANDATORY: correct checksums before flashing",
+            "  ⚠  STEP 5 — MANDATORY: correct checksums before flashing",
             fg=typer.colors.YELLOW,
             bold=True,
         )
@@ -285,8 +290,9 @@ def workflow() -> None:
         "",
         "    ECM Titanium  •  WinOLS  •  Checksum Fix Pro  •  or equivalent",
         "",
-        "openremap validate tuned confirms the recipe was applied correctly.",
-        "It does not replace a checksum tool. These are two different things.",
+        "openremap tune Phase 3 (validate after) confirms the recipe was",
+        "applied correctly. It does NOT replace a checksum tool.",
+        "These are two different things.",
         "",
         "Flashing a tuned binary with an incorrect checksum WILL brick your ECU.",
         "No exceptions. No recovery without a bench flash or JTAG setup.",
@@ -296,7 +302,8 @@ def workflow() -> None:
     _blank()
     _sep()
     _body(
-        "Full reference:  openremap <command> --help   or   docs/cli.md",
+        "Quick reference:  openremap commands",
+        "Full reference:   openremap <command> --help   or   docs/cli.md",
     )
     _sep()
     _blank()

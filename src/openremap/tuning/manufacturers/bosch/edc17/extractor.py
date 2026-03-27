@@ -126,6 +126,45 @@ class BoschExtractor(BaseManufacturerExtractor):
         if b"RamLoader.Me9" in data[:0x200000] and b"MED9" not in data:
             return False
 
+        # ------------------------------------------------------------------
+        # Guard 4 — reject Magneti Marelli ECUs with a ZZ ident block at
+        # 0x10000.  Marelli ME1.5.5 (and related IAW families) place a
+        # slash-delimited descriptor starting with "ZZ" at the same fixed
+        # offset used by Bosch ME7, but the byte immediately after "ZZ" is
+        # a printable ASCII character (e.g. "ZZ43/1/ME1.5.5/...").  All
+        # genuine Bosch ME7 variants use a non-printable third byte
+        # (\xff, \x00, or \x01).  A Marelli bin can pass Guards 1–3 and
+        # then trigger on a coincidental b"MD1" byte sequence in calibration
+        # data — this guard prevents that false positive.
+        # ------------------------------------------------------------------
+        if (
+            len(data) > 0x10002
+            and data[0x10000:0x10002] == b"ZZ"
+            and 0x20 <= data[0x10002] <= 0x7E
+        ):
+            return False
+
+        # ------------------------------------------------------------------
+        # Guard 5 — reject Bosch ME7 family files.
+        # ME7.x / ME71 / ME731 / MOTRONIC are exclusive to BoschME7Extractor.
+        # Large ME7 variants (e.g. ME7.6.2 for Opel Corsa D, 832KB) carry a
+        # generic manufacturer label ("BOSCH0100") that triggers the b"BOSCH"
+        # detection signature here.  Checking for ME7 family strings across
+        # the full binary prevents a false-positive CONTESTED classification
+        # when BoschME7Extractor has already claimed the file correctly.
+        # ME7 family strings never appear in genuine EDC17 / MEDC17 / MD1
+        # binaries — they use a completely different toolchain and naming
+        # convention.
+        # ------------------------------------------------------------------
+        _ME7_FAMILY_SIGNATURES: tuple[bytes, ...] = (
+            b"ME7.",  # ME7.1  ME7.5  ME7.1.1  ME7.5.5  ME7.5.10  ME7.6.2
+            b"ME71",  # earliest production variant (no dot notation)
+            b"ME731",  # Alfa Romeo Motronic E7.3.1
+            b"MOTRONIC",  # Bosch Motronic label — present in most ME7 bins
+        )
+        if any(sig in data for sig in _ME7_FAMILY_SIGNATURES):
+            return False
+
         return any(sig in data for sig in DETECTION_SIGNATURES)
 
     # -----------------------------------------------------------------------

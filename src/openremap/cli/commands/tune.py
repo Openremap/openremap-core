@@ -1,22 +1,23 @@
 """
-openremap tune <target> <recipe> --output target_tuned.bin
+openremap tune <target> <recipe> [--output <out>]
 
-Apply a tuning recipe to a target ECU binary.
+One-shot workflow: validate → apply → verify.
 
-Internally runs strict pre-flight validation before writing anything.
-Uses a ctx+ob anchor search within ±2 KB of the expected offset to
-tolerate minor SW revision shifts between calibrations.
+  Phase 1 — validate before   : strict pre-flight check (ob bytes at expected offsets)
+  Phase 2 — apply             : write mb bytes to target (with ±2 KB anchor search)
+  Phase 3 — validate after    : confirm mb bytes are present in the tuned binary
 
-On success, writes the tuned binary and prints a summary.
-On failure, exits with code 1 and prints which instructions failed —
-the original file is never modified.
+The original file is never modified. The tuned binary is written only when all
+three phases pass. Exit code 0 = success, 1 = any phase failed.
+
+Use --skip-validation to bypass Phases 1 and 3 (escape hatch for scripted pipelines).
 
 Examples:
     openremap tune target.bin recipe.json
     openremap tune target.bin recipe.json --output my_tuned.bin
+    openremap tune target.bin recipe.json --report tune_report.json
     openremap tune target.bin recipe.json --skip-validation
     openremap tune target.bin recipe.json --json
-    openremap tune target.bin recipe.json --report tune_report.json
 """
 
 from __future__ import annotations
@@ -28,9 +29,11 @@ from typing import Annotated, Optional
 import typer
 
 from openremap.tuning.services.patcher import ECUPatcher
+from openremap.tuning.services.validate_patched import ECUPatchedValidator
+from openremap.tuning.services.validate_strict import ECUStrictValidator
 
 # ---------------------------------------------------------------------------
-# Helpers
+# Helpers — file I/O
 # ---------------------------------------------------------------------------
 
 _ALLOWED_BIN = (".bin", ".ori")
@@ -117,89 +120,382 @@ def _default_output(target: Path) -> Path:
     return target.parent / f"{target.stem}_tuned{target.suffix}"
 
 
-def _print_summary(report: dict, output: Path) -> None:
-    """Print a human-readable tune summary to stdout."""
+# ---------------------------------------------------------------------------
+# Helpers — output formatting
+# ---------------------------------------------------------------------------
+
+_W = 56  # separator width inside the output block
+
+
+def _phase_header(number: int, title: str, skip: bool = False) -> None:
+    dim_line = typer.style("  " + "─" * _W, dim=True)
+    colour = typer.colors.YELLOW if skip else typer.colors.CYAN
+    label = typer.style(f"  Phase {number} — {title}", fg=colour, bold=True)
+    typer.echo(dim_line)
+    typer.echo(label)
+    typer.echo("")
+
+
+def _ok(text: str) -> None:
+    typer.echo("  " + typer.style("✅ ", fg=typer.colors.GREEN) + text)
+
+
+def _fail(text: str) -> None:
+    typer.echo("  " + typer.style("❌ ", fg=typer.colors.RED) + text)
+
+
+def _skip(text: str) -> None:
+    typer.echo(
+        "  " + typer.style("⏭  ", fg=typer.colors.YELLOW) + typer.style(text, dim=True)
+    )
+
+
+def _kv(label: str, value: str, col: int = 24) -> None:
+    typer.echo(f"  {label:<{col}} {value}")
+
+
+def _warn(text: str) -> None:
+    typer.echo(typer.style(f"  ⚠  {text}", fg=typer.colors.YELLOW))
+
+
+# ---------------------------------------------------------------------------
+# Phase runners
+# ---------------------------------------------------------------------------
+
+
+def _run_phase1(
+    target_data: bytes,
+    recipe_dict: dict,
+    target_name: str,
+    recipe_name: str,
+) -> tuple[bool, dict]:
+    """
+    Phase 1 — validate before (strict pre-flight check).
+
+    Returns (passed: bool, report: dict).
+    """
+    _phase_header(1, "Pre-flight check  (validate before)")
+
+    try:
+        validator = ECUStrictValidator(
+            target_data=target_data,
+            recipe=recipe_dict,
+            target_name=target_name,
+            recipe_name=recipe_name,
+        )
+        size_warn = validator.check_file_size()
+        match_key_warn = validator.check_match_key()
+        validator.validate_all()
+        report = validator.to_dict()
+    except Exception as exc:
+        _fail(f"Strict validation error — {exc}")
+        return False, {}
+
     summary = report.get("summary", {})
+    safe = summary.get("safe_to_patch", False)
+    passed = summary.get("passed", 0)
+    failed = summary.get("failed", 0)
     total = summary.get("total", 0)
+
+    if size_warn:
+        _warn(f"Size mismatch: {size_warn}")
+    if match_key_warn:
+        _warn(f"Match key mismatch: {match_key_warn}")
+
+    col = 24
+    _kv("Target", target_name, col)
+    _kv("MD5", report.get("target_md5", "?"), col)
+    _kv("Instructions", f"{total:,}", col)
+    _kv(
+        "Passed",
+        typer.style(
+            str(passed),
+            fg=typer.colors.GREEN if passed == total else typer.colors.WHITE,
+        ),
+        col,
+    )
+    if failed:
+        _kv(
+            "Failed",
+            typer.style(str(failed), fg=typer.colors.RED, bold=True),
+            col,
+        )
+
+    typer.echo("")
+
+    if safe:
+        _ok("Target matches recipe — safe to apply")
+    else:
+        _fail(
+            f"NOT safe to apply — {failed} instruction(s) failed. "
+            "Run  openremap validate check  to diagnose."
+        )
+
+    typer.echo("")
+    return safe, report
+
+
+def _run_phase2(
+    target_data: bytes,
+    recipe_dict: dict,
+    target_name: str,
+    recipe_name: str,
+    skip_validation: bool,
+) -> tuple[bool, bytes, dict]:
+    """
+    Phase 2 — apply the recipe.
+
+    The ECUPatcher always re-runs strict validation internally unless
+    skip_validation=True. Since we already ran Phase 1 explicitly and it
+    passed, we pass skip_validation=True here to avoid a redundant check.
+
+    Returns (applied: bool, tuned_bytes: bytes, report: dict).
+    """
+    _phase_header(2, "Applying tune", skip=skip_validation)
+
+    if skip_validation:
+        _skip("Pre-flight validation skipped (--skip-validation)")
+
+    try:
+        patcher = ECUPatcher(
+            target_data=target_data,
+            recipe=recipe_dict,
+            target_name=target_name,
+            recipe_name=recipe_name,
+            skip_validation=True,  # Phase 1 already ran (or was intentionally skipped)
+        )
+        tuned_bytes = patcher.apply_all()
+    except ValueError as exc:
+        _fail(f"Apply rejected — {exc}")
+        return False, b"", {}
+    except Exception as exc:
+        _fail(f"Apply failed unexpectedly — {exc}")
+        return False, b"", {}
+
+    report = patcher.to_dict(patched_data=tuned_bytes)
+    summary = report.get("summary", {})
     applied = summary.get("success", 0)
     failed = summary.get("failed", 0)
     shifted = summary.get("shifted", 0)
-    # Key names come from PatchSummarySchema — kept as-is to avoid breaking the schema.
+    total = summary.get("total", 0)
     tune_applied = summary.get("patch_applied", False)
-    tuned_md5 = summary.get("patched_md5")
 
-    typer.echo("")
-
-    if tune_applied:
-        typer.echo(
-            typer.style(
-                "  ✅ Tune applied successfully", fg=typer.colors.GREEN, bold=True
-            )
-        )
-    else:
-        typer.echo(typer.style("  ❌ Tuning failed", fg=typer.colors.RED, bold=True))
-
-    col = 22
-    typer.echo("")
-    typer.echo(f"  {'Target':<{col}} {report.get('target_file', '?')}")
-    typer.echo(f"  {'Target MD5':<{col}} {report.get('target_md5', '?')}")
-    if tuned_md5:
-        typer.echo(f"  {'Tuned MD5':<{col}} {tuned_md5}")
-    typer.echo(f"  {'Instructions':<{col}} {total:,}")
-    typer.echo(
-        f"  {'Applied':<{col}} "
-        + typer.style(
+    col = 24
+    _kv("Instructions", f"{total:,}", col)
+    _kv(
+        "Applied",
+        typer.style(
             str(applied),
             fg=typer.colors.GREEN if applied == total else typer.colors.WHITE,
-        )
+        ),
+        col,
     )
     if shifted:
+        _kv(
+            "Shifted",
+            typer.style(str(shifted), fg=typer.colors.YELLOW, bold=True),
+            col,
+        )
         typer.echo(
-            f"  {'Applied (shifted)':<{col}} "
-            + typer.style(str(shifted), fg=typer.colors.YELLOW, bold=True)
+            typer.style(
+                "     Shifted instructions were recovered via ±2 KB anchor search.",
+                dim=True,
+            )
         )
     if failed:
-        typer.echo(
-            f"  {'Failed':<{col}} "
-            + typer.style(str(failed), fg=typer.colors.RED, bold=True)
+        _kv(
+            "Failed",
+            typer.style(str(failed), fg=typer.colors.RED, bold=True),
+            col,
         )
-
-    # Print details for any failed instructions
-    failed_results = [
-        r for r in report.get("results", []) if r.get("status") == "failed"
-    ]
-    if failed_results:
-        typer.echo("")
-        typer.echo(
-            typer.style("  Failed instructions:", fg=typer.colors.RED, bold=True)
-        )
-        for r in failed_results:
+        # Print per-instruction failures
+        failed_results = [
+            r for r in report.get("results", []) if r.get("status") == "failed"
+        ]
+        if failed_results:
+            typer.echo("")
             typer.echo(
-                f"    #{r.get('index', '?'):>4}  "
-                f"offset {r.get('offset_expected_hex', '?')}  "
-                f"— {r.get('message', 'unknown error')}"
+                typer.style("  Failed instructions:", fg=typer.colors.RED, bold=True)
             )
+            for r in failed_results:
+                typer.echo(
+                    f"    #{r.get('index', '?'):>4}  "
+                    f"offset {r.get('offset_expected_hex', '?')}  "
+                    f"— {r.get('message', 'unknown error')}"
+                )
 
     typer.echo("")
 
     if tune_applied:
-        typer.echo(
-            f"  Tuned binary saved to "
-            f"{typer.style(str(output), fg=typer.colors.CYAN, bold=True)}"
+        _ok(f"Recipe applied — {applied}/{total} instructions written")
+    else:
+        _fail(
+            f"{failed} instruction(s) could not be applied — tuned binary NOT written"
         )
+
+    typer.echo("")
+    return tune_applied, tuned_bytes, report
+
+
+def _run_phase3(
+    tuned_bytes: bytes,
+    recipe_dict: dict,
+    tuned_name: str,
+    recipe_name: str,
+) -> tuple[bool, dict]:
+    """
+    Phase 3 — validate after (post-tune verification).
+
+    Returns (confirmed: bool, report: dict).
+    """
+    _phase_header(3, "Post-tune verification  (validate after)")
+
+    try:
+        validator = ECUPatchedValidator(
+            patched_data=tuned_bytes,
+            recipe=recipe_dict,
+            patched_name=tuned_name,
+            recipe_name=recipe_name,
+        )
+        validator.verify_all()
+        report = validator.to_dict()
+    except Exception as exc:
+        _fail(f"Post-tune verification error — {exc}")
+        return False, {}
+
+    summary = report.get("summary", {})
+    confirmed = summary.get("patch_confirmed", False)
+    passed = summary.get("passed", 0)
+    failed = summary.get("failed", 0)
+    total = summary.get("total", 0)
+
+    col = 24
+    _kv("Instructions", f"{total:,}", col)
+    _kv(
+        "Confirmed",
+        typer.style(
+            str(passed),
+            fg=typer.colors.GREEN if passed == total else typer.colors.WHITE,
+        ),
+        col,
+    )
+    if failed:
+        _kv(
+            "Failed",
+            typer.style(str(failed), fg=typer.colors.RED, bold=True),
+            col,
+        )
+        failures = [r for r in report.get("all_results", []) if not r.get("passed")]
+        if failures:
+            typer.echo("")
+            typer.echo(
+                typer.style("  Failed instructions:", fg=typer.colors.RED, bold=True)
+            )
+            for r in failures:
+                typer.echo(
+                    f"    #{r['instruction_index']:>4}  "
+                    f"offset 0x{r['offset_hex']}  "
+                    f"size {r['size']} bytes  — {r['reason']}"
+                )
+
+    typer.echo("")
+
+    if confirmed:
+        _ok("All mb bytes confirmed in tuned binary")
+    else:
+        _fail("Post-tune verification failed — do NOT flash this binary")
+
+    typer.echo("")
+    return confirmed, report
+
+
+# ---------------------------------------------------------------------------
+# Summary footer
+# ---------------------------------------------------------------------------
+
+
+def _print_footer(
+    p1_ok: bool,
+    p2_ok: bool,
+    p3_ok: bool,
+    output: Path,
+    tune_applied: bool,
+    target_md5: str,
+    tuned_md5: str,
+    skip_validation: bool,
+) -> None:
+    dim_line = typer.style("  " + "─" * _W, dim=True)
+    typer.echo(dim_line)
+
+    all_ok = (p1_ok or skip_validation) and p2_ok and (p3_ok or skip_validation)
+
+    if all_ok:
+        typer.echo(typer.style("  ✅ Tune complete", fg=typer.colors.GREEN, bold=True))
+    else:
+        typer.echo(typer.style("  ❌ Tune failed", fg=typer.colors.RED, bold=True))
+
+    typer.echo("")
+
+    col = 24
+    _kv("Target MD5", target_md5, col)
+    if tune_applied:
+        _kv("Tuned MD5", tuned_md5, col)
+        _kv(
+            "Tuned binary",
+            typer.style(str(output), fg=typer.colors.CYAN, bold=True),
+            col,
+        )
+    typer.echo("")
+
+    if all_ok:
         typer.echo(
             typer.style(
-                "\n  ⚠  Always verify checksums with ECM Titanium, WinOLS, or a similar\n"
-                "     tool before flashing the tuned binary to a vehicle.",
+                "  ⚠  MANDATORY: correct checksums with ECM Titanium, WinOLS, or\n"
+                "     a similar tool before flashing the tuned binary to a vehicle.\n"
+                "     Flashing without checksum correction will brick the ECU.",
                 fg=typer.colors.YELLOW,
             )
         )
+        typer.echo("")
 
+    typer.echo(dim_line)
     typer.echo("")
 
 
 # ---------------------------------------------------------------------------
-# Command — registered directly on the main app (flat, no sub-Typer).
+# JSON report builder
+# ---------------------------------------------------------------------------
+
+
+def _build_combined_report(
+    target_name: str,
+    recipe_name: str,
+    output: Path,
+    p1_report: dict,
+    p2_report: dict,
+    p3_report: dict,
+    p1_skipped: bool,
+    p3_skipped: bool,
+) -> dict:
+    return {
+        "target_file": target_name,
+        "recipe_file": recipe_name,
+        "output_file": str(output),
+        "phase_1_validate_before": {"skipped": p1_skipped, **p1_report},
+        "phase_2_apply": p2_report,
+        "phase_3_validate_after": {"skipped": p3_skipped, **p3_report},
+        "success": (
+            (p1_skipped or p1_report.get("summary", {}).get("safe_to_patch", False))
+            and p2_report.get("summary", {}).get("patch_applied", False)
+            and (
+                p3_skipped or p3_report.get("summary", {}).get("patch_confirmed", False)
+            )
+        ),
+    }
+
+
+# ---------------------------------------------------------------------------
+# Command
 # ---------------------------------------------------------------------------
 
 
@@ -244,9 +540,9 @@ def tune(
         typer.Option(
             "--skip-validation",
             help=(
-                "Skip strict pre-flight validation and apply the recipe directly. "
-                "Use with caution — only if you have already run 'validate strict' "
-                "and are confident the target matches."
+                "Skip Phases 1 and 3 (pre-flight and post-tune validation) and apply "
+                "the recipe directly. Use with caution — only in scripted pipelines where "
+                "you have already validated separately."
             ),
         ),
     ] = False,
@@ -254,7 +550,7 @@ def tune(
         bool,
         typer.Option(
             "--json",
-            help="Print the full tune report as JSON instead of a human-readable summary.",
+            help="Print the combined three-phase report as JSON instead of the human-readable output.",
         ),
     ] = False,
     report_output: Annotated[
@@ -262,82 +558,126 @@ def tune(
         typer.Option(
             "--report",
             "-r",
-            help="Save the full tune report as a JSON file.",
+            help="Save the combined three-phase report as a JSON file.",
             resolve_path=True,
         ),
     ] = None,
 ) -> None:
     """
-    Apply a tuning recipe to a target ECU binary.
-
-    Runs strict pre-flight validation before writing anything (unless
-    --skip-validation is passed). Uses a ctx+ob anchor search within
-    ±2 KB of the expected offset to tolerate minor SW revision shifts.
-
-    On success, writes the tuned binary and prints a summary.
-    On failure, exits with code 1 and prints which instructions failed —
-    the original target file is never modified.
+    Validate, apply, and verify a tuning recipe in one shot.
 
     \b
-    Remember: always verify checksums with ECM Titanium, WinOLS, or a
+    Phase 1 — validate before : strict pre-flight check
+    Phase 2 — apply           : write mb bytes (±2 KB anchor search)
+    Phase 3 — validate after  : confirm every mb byte was written correctly
+
+    The original TARGET file is never modified. The tuned binary is written
+    only when all three phases pass.  Pass --skip-validation to bypass
+    Phases 1 and 3 (escape hatch for scripted pipelines).
+
+    \b
+    Run  openremap validate check  if Phase 1 fails — it searches the whole
+    binary and tells you whether the maps shifted or the ECU is wrong.
+
+    \b
+    Remember: always correct checksums with ECM Titanium, WinOLS, or a
     similar tool before flashing the tuned binary to a vehicle.
     """
     target_data = _read_bin(target, "Target")
     recipe_dict = _read_recipe(recipe)
-
     resolved_output = output or _default_output(target)
 
+    typer.echo("")
     typer.echo(
-        f"\n  Applying tune "
-        f"{typer.style(recipe.name, fg=typer.colors.CYAN)} "
-        f"to "
-        f"{typer.style(target.name, fg=typer.colors.CYAN)} …"
+        typer.style("  openremap tune", bold=True)
+        + "  "
+        + typer.style(target.name, fg=typer.colors.CYAN)
+        + "  +  "
+        + typer.style(recipe.name, fg=typer.colors.CYAN)
     )
+    typer.echo("")
 
+    # ── Phase 1 ──────────────────────────────────────────────────────────────
     if skip_validation:
-        typer.echo(
-            typer.style(
-                "  ⚠  Pre-flight validation skipped (--skip-validation).",
-                fg=typer.colors.YELLOW,
-            )
-        )
-
-    try:
-        patcher = ECUPatcher(
+        _phase_header(1, "Pre-flight check  (validate before)", skip=True)
+        _skip("Skipped (--skip-validation)")
+        typer.echo("")
+        p1_ok = True
+        p1_report: dict = {}
+        target_md5 = "—"
+    else:
+        p1_ok, p1_report = _run_phase1(
             target_data=target_data,
-            recipe=recipe_dict,
+            recipe_dict=recipe_dict,
             target_name=target.name,
             recipe_name=recipe.name,
-            skip_validation=skip_validation,
         )
-        tuned_bytes = patcher.apply_all()
-    except ValueError as exc:
-        # Raised by the patcher when strict validation fails before any writes.
-        typer.echo(
-            typer.style(
-                f"\n  ❌ Tune rejected during pre-flight validation:\n\n  {exc}",
-                fg=typer.colors.RED,
-                bold=True,
-            ),
-            err=True,
+        target_md5 = p1_report.get("target_md5", "?")
+
+        if not p1_ok:
+            # Fast-fail: no point applying if the target doesn't match
+            combined = _build_combined_report(
+                target.name,
+                recipe.name,
+                resolved_output,
+                p1_report,
+                {},
+                {},
+                p1_skipped=False,
+                p3_skipped=skip_validation,
+            )
+            if as_json:
+                typer.echo(json.dumps(combined, indent=2, ensure_ascii=False))
+            if report_output:
+                _write_report(combined, report_output)
+            raise typer.Exit(code=1)
+
+    # ── Phase 2 ──────────────────────────────────────────────────────────────
+    p2_ok, tuned_bytes, p2_report = _run_phase2(
+        target_data=target_data,
+        recipe_dict=recipe_dict,
+        target_name=target.name,
+        recipe_name=recipe.name,
+        skip_validation=skip_validation,
+    )
+    tuned_md5 = p2_report.get("summary", {}).get("patched_md5", "?")
+
+    if not p2_ok:
+        combined = _build_combined_report(
+            target.name,
+            recipe.name,
+            resolved_output,
+            p1_report,
+            p2_report,
+            {},
+            p1_skipped=skip_validation,
+            p3_skipped=skip_validation,
         )
-        raise typer.Exit(code=1)
-    except Exception as exc:
-        typer.echo(
-            typer.style(
-                f"\n  Error: tuning failed unexpectedly — {exc}",
-                fg=typer.colors.RED,
-                bold=True,
-            ),
-            err=True,
-        )
+        if as_json:
+            typer.echo(json.dumps(combined, indent=2, ensure_ascii=False))
+        if report_output:
+            _write_report(combined, report_output)
         raise typer.Exit(code=1)
 
-    report = patcher.to_dict(patched_data=tuned_bytes)
-    tune_applied = report.get("summary", {}).get("patch_applied", False)
+    # ── Phase 3 ──────────────────────────────────────────────────────────────
+    if skip_validation:
+        _phase_header(3, "Post-tune verification  (validate after)", skip=True)
+        _skip("Skipped (--skip-validation)")
+        typer.echo("")
+        p3_ok = True
+        p3_report: dict = {}
+    else:
+        p3_ok, p3_report = _run_phase3(
+            tuned_bytes=tuned_bytes,
+            recipe_dict=recipe_dict,
+            tuned_name=resolved_output.name,
+            recipe_name=recipe.name,
+        )
 
-    # --- Write tuned binary ---
-    if tune_applied:
+    # ── Write tuned binary ───────────────────────────────────────────────────
+    all_ok = p1_ok and p2_ok and p3_ok
+
+    if p2_ok:
         try:
             resolved_output.parent.mkdir(parents=True, exist_ok=True)
             resolved_output.write_bytes(tuned_bytes)
@@ -352,27 +692,56 @@ def tune(
             )
             raise typer.Exit(code=1)
 
-    # --- Write report file if requested ---
+    # ── Build combined report ────────────────────────────────────────────────
+    combined = _build_combined_report(
+        target.name,
+        recipe.name,
+        resolved_output,
+        p1_report,
+        p2_report,
+        p3_report,
+        p1_skipped=skip_validation,
+        p3_skipped=skip_validation,
+    )
+
     if report_output:
-        try:
-            report_output.parent.mkdir(parents=True, exist_ok=True)
-            report_output.write_text(
-                json.dumps(report, indent=2, ensure_ascii=False), encoding="utf-8"
-            )
-        except OSError as exc:
-            typer.echo(
-                typer.style(
-                    f"Warning: could not write report to '{report_output}': {exc}",
-                    fg=typer.colors.YELLOW,
-                ),
-                err=True,
-            )
+        _write_report(combined, report_output)
 
-    # --- Output ---
+    # ── Output ───────────────────────────────────────────────────────────────
     if as_json:
-        typer.echo(json.dumps(report, indent=2, ensure_ascii=False))
+        typer.echo(json.dumps(combined, indent=2, ensure_ascii=False))
     else:
-        _print_summary(report, resolved_output)
+        _print_footer(
+            p1_ok=p1_ok,
+            p2_ok=p2_ok,
+            p3_ok=p3_ok,
+            output=resolved_output,
+            tune_applied=p2_ok,
+            target_md5=target_md5,
+            tuned_md5=tuned_md5,
+            skip_validation=skip_validation,
+        )
 
-    if not tune_applied:
+    if not all_ok:
         raise typer.Exit(code=1)
+
+
+# ---------------------------------------------------------------------------
+# Internal — report writer
+# ---------------------------------------------------------------------------
+
+
+def _write_report(data: dict, path: Path) -> None:
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8"
+        )
+    except OSError as exc:
+        typer.echo(
+            typer.style(
+                f"Warning: could not write report to '{path}': {exc}",
+                fg=typer.colors.YELLOW,
+            ),
+            err=True,
+        )

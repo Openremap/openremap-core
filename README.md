@@ -1,20 +1,26 @@
 # OpenRemap
 
 [![CI](https://github.com/Pinelo92/openremap/actions/workflows/ci.yml/badge.svg)](https://github.com/Pinelo92/openremap/actions/workflows/ci.yml)
+[![Coverage](https://codecov.io/gh/Pinelo92/openremap/branch/main/graph/badge.svg)](https://codecov.io/gh/Pinelo92/openremap)
 [![PyPI](https://img.shields.io/pypi/v/openremap.svg)](https://pypi.org/project/openremap/)
+[![Changelog](https://img.shields.io/badge/-Changelog-blue.svg)](CHANGELOG.md)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python 3.14+](https://img.shields.io/badge/python-3.14+-blue.svg)](https://www.python.org/downloads/)
 [![uv](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/uv/main/assets/badge/v0.json)](https://github.com/astral-sh/uv)
 
-Know what any ECU binary is. Spot a modified file before it causes damage. Apply tunes with a recipe you can read in any text editor.
+> **CLI tool. Runs on your machine. No internet. No account. No data leaves your hands — ever.**
 
-**Identify** — drop any `.bin` and get manufacturer, ECU family, software version, and hardware number back in under a second. Works offline, no cloud, no subscriptions.
+Drop a `.bin`, know exactly what it is. Triage a folder of hundreds. Apply a tune you can read in any text editor.
 
-**Check originality** — the confidence system reads signals straight from the binary: canonical software version, hardware part number, ident block integrity. Modified files, wiped idents, and tuned-but-relabelled dumps are flagged automatically, before you've done anything with them.
+**Identify** — manufacturer, ECU family, software version, hardware number, and a confidence verdict in under a second. Works on anything from an 8 KB LH-Jetronic ROM to an 8 MB EDC17 dump.
 
-**Tune with human-readable recipes** — diff a stock and a modified binary into a portable JSON recipe. Validate it against any target before touching it. Apply it byte-by-byte. Verify every write landed. The full audit trail sits in a file you can open in Notepad.
+**Confidence scoring** — signals read straight from the binary: SW version integrity, hardware part number, ident block presence. Wiped idents, tuned-but-relabelled dumps, and modified files are flagged before you've touched anything. `HIGH` means it looks factory-fresh. `SUSPICIOUS` means stop and check.
 
-Built for tuners who want to understand what they're writing to an ECU, and for developers who want an open, scriptable alternative to closed toolchains. → [How it works in detail](docs/about.md)
+**Scan and organise** — point `scan` at a folder of hundreds of mixed binaries and get them sorted into `Bosch/EDC17/`, `Bosch/ME7/`, etc. in one command. Every file classified, confidence-tagged, and optionally exported to JSON or CSV.
+
+**Tune with a recipe you can read** — diff a stock and a modified binary into a portable JSON file. Inspect every changed byte offset before applying anything. `tune` validates, patches, and verifies in one shot. The full audit trail is a file you can open in Notepad.
+
+→ [How it works in detail](docs/about.md)
 
 ---
 
@@ -43,38 +49,38 @@ Adding a new manufacturer? → [CONTRIBUTING.md](CONTRIBUTING.md)
 Full CLI reference → [`docs/cli.md`](docs/cli.md)
 
 ```bash
-# New users: print the full step-by-step workflow guide
+# New here? Print the full step-by-step guide
 openremap workflow
 
-# Identify an ECU binary — family, SW version, hardware number, and confidence
+# Quick reminder of every command and its syntax
+openremap commands
+
+# List every supported ECU family (add --family EDC16 for full detail)
+openremap families
+
+# Identify a binary — manufacturer, family, SW version, hardware number, confidence
 openremap identify ecu.bin
 
 # Batch-scan a folder — dry-run preview, nothing moves
 openremap scan ./my_bins/
 
-# Sort files into a manufacturer/family tree once you're happy with the preview
+# Sort into a manufacturer/family tree when you're happy with the preview
 openremap scan ./my_bins/ --move --organize
 
-# Save a report with confidence scores for every file in the folder
-openremap scan ./my_bins/ --report report.json
-
-# Extract the tune — diff a stock and a modified binary into a recipe
+# Diff a stock and a tuned binary into a portable recipe
 openremap cook stock.bin stage1.bin --output recipe.json
 
-# Validate the target before touching it (run this first — always)
-openremap validate strict target.bin recipe.json
+# One-shot: validate before → apply → validate after  (writes target_tuned.bin)
+openremap tune target.bin recipe.json
 
-# Apply the tune
-openremap tune target.bin recipe.json --output target_tuned.bin
-
-# Confirm every byte landed correctly
-openremap validate tuned target_tuned.bin recipe.json
+# Phase 1 failed? Diagnose why — searches the whole binary for shifted or missing maps
+openremap validate check target.bin recipe.json
 ```
 
 > 🔴 **CHECKSUM VERIFICATION IS MANDATORY**
 > Before flashing any tuned binary to a vehicle, you **must** run it through a
 > dedicated checksum correction tool (ECM Titanium, WinOLS, or equivalent).
-> `openremap validate tuned` confirms the recipe was applied — it does **not**
+> `openremap tune` Phase 3 confirms the recipe was applied correctly — it does **not**
 > correct or validate ECU checksums. Flashing a binary with an incorrect checksum
 > **will brick your ECU.** No exceptions.
 
@@ -82,54 +88,9 @@ openremap validate tuned target_tuned.bin recipe.json
 
 ## Confidence Scoring
 
-Every `identify` result and every `scan` line includes a confidence assessment — a quick read on how likely a binary is to be an unmodified factory file, based on signals read directly from the binary and from the filename.
+Every `identify` result and every `scan` line includes a confidence tier — `HIGH`, `MEDIUM`, `LOW`, `SUSPICIOUS`, or `UNKNOWN` — based on signals read directly from the binary: SW version integrity, hardware part number, ident block presence, and filename. `SUSPICIOUS` is not a verdict; it is a prompt to look closer.
 
-```
-  ── Confidence ─────────────────────────────────────
-  Tier   HIGH
-  Signal  +  canonical SW version (1037-prefixed)
-  Signal  +  hardware number present (0261209352)
-  Signal  +  ECU variant identified (EDC17C66)
-```
-
-```
-  ── Confidence ─────────────────────────────────────
-  Tier   SUSPICIOUS
-  Signal  -  SW ident absent — no match key produced
-  Signal  -  tuning/modification keywords in filename
-  ⚠  IDENT BLOCK MISSING
-  ⚠  TUNING KEYWORDS IN FILENAME
-```
-
-| Tier | What it means |
-|---|---|
-| **HIGH** | All key identifiers present — looks like an unmodified factory file |
-| **MEDIUM** | Most identifiers present, minor concerns only |
-| **LOW** | Some identifiers missing, or a mild filename signal |
-| **SUSPICIOUS** | Strong modification signals — inspect before use |
-| **UNKNOWN** | No extractor matched the binary |
-
-Signals that raise or lower confidence:
-
-| Signal | Direction |
-|---|---|
-| SW version present and canonical (`1037`-prefixed for Bosch) | `+` |
-| Hardware number present | `+` |
-| ECU variant identified | `+` |
-| Calibration ID present | `+` |
-| SW version absent for a family that normally stores it | `-` |
-| Tuning keywords in filename (`stage`, `remap`, `tuned`, `disable`, …) | `-` |
-| Generic numbered filename (`1.bin`, `42.bin`, …) | `-` |
-
-Warnings flag specific red flags:
-
-- `⚠ IDENT BLOCK MISSING` — software version absent for a family that always stores one; strong signal of a wiped or tampered ident block
-- `⚠ TUNING KEYWORDS IN FILENAME` — filename suggests the file has been modified
-- `⚠ GENERIC FILENAME` — bare numbered filename provides no identifying context
-
-The system is **manufacturer-agnostic** — any extractor registered in the system gets confidence scoring automatically. The `1037` prefix check is Bosch-specific; for other manufacturers, any software version present earns the positive signal. All other signals apply equally across all families.
-
-Use `openremap identify` for the full per-signal breakdown on a single file, or `openremap scan --report report.json` to triage an entire folder at once.
+→ **[Full reference: tiers, signals, warnings, and score breakdown](docs/confidence.md)**
 
 ---
 
@@ -141,6 +102,7 @@ Use `openremap identify` for the full per-signal breakdown on a single file, or 
 | [`docs/install/macos-linux.md`](docs/install/macos-linux.md) | macOS / Linux install — uv, pip, shell completion, troubleshooting |
 | [`docs/install/developers.md`](docs/install/developers.md) | Developer setup — clone, test suite, project structure, publishing |
 | [`docs/cli.md`](docs/cli.md) | Commands overview — what each command does, with links to full per-command pages |
+| [`docs/confidence.md`](docs/confidence.md) | Confidence scoring — tiers, signals, warnings, and score breakdown |
 | [`docs/manufacturers/bosch.md`](docs/manufacturers/bosch.md) | Supported Bosch ECU families — era, file sizes, vehicle applications, confidence notes |
 | [`docs/recipe-format.md`](docs/recipe-format.md) | The recipe JSON spec — fields, structure, versioning |
 | [`CONTRIBUTING.md`](CONTRIBUTING.md) | How to add a new ECU extractor, code style, submitting a PR, contributor safety notice |

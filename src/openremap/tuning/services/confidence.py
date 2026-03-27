@@ -41,7 +41,9 @@ from pathlib import Path
 from typing import List
 
 # ---------------------------------------------------------------------------
-# ECU families known to embed a 1037-prefixed software_version in the binary.
+# ECU families known to embed a canonical Bosch SW version in the binary.
+# "Canonical" covers both the standard "1037" prefix (VW/Audi/BMW/Alfa/Opel)
+# and the PSA/Peugeot-Citroën "1039" prefix (EDC16C34 and related variants).
 # When software_version is None for one of these families the "IDENT BLOCK
 # MISSING" warning is raised, because absence is abnormal for that platform.
 # ---------------------------------------------------------------------------
@@ -229,10 +231,10 @@ def score_identity(identity: dict, filename: str = "unknown.bin") -> ConfidenceR
 
     # ── Software version ────────────────────────────────────────────────────
     if sw:
-        if sw.startswith("1037"):
+        if sw.startswith(("1037", "1039")):
             score += 40
             signals.append(
-                ConfidenceSignal(+40, "canonical SW version (1037-prefixed)")
+                ConfidenceSignal(+40, "canonical SW version (1037/1039-prefixed)")
             )
         else:
             score += 15

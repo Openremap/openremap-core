@@ -22,6 +22,16 @@ Binary structure (all M2.x, 64KB = 0x10000 bytes):
                       '<VAG_PART>    MOTOR    PMC <HW_10><SW_10>'
                     Format B (Porsche 964 / M2.3, 32KB):
                       'M<rev>MOTRONIC<model_4><part_8><HW_10><XX><SW_10>'
+                    Format C (Opel M2.8/M2.81, 64KB+):
+                      b'\xff{3+} <HW_10> <SW_10> ...'
+                      e.g. b'\xff...\xff 0261203080 1267358003 M28 000\xff...'
+                      No OEM part number; HW/SW delimited by spaces inside
+                      a 0xFF-padded block near the end of ROM.
+                    Format D (Opel M2.7, 32KB — reversed-string):
+                      b'dx<HW_10_reversed><SW_10_reversed>...'
+                      e.g. b'dx4103021620022753762121132409JP'
+                           -> hw='4103021620'[::-1]='0261203014'
+                           -> sw='0227537621'[::-1]='1267357220'
 
                     In Format A bins the label is consistently located at a
                     fixed region near the end of ROM:
@@ -60,6 +70,10 @@ Verified across all sample bins:
   VR6_0261203117...bin         -> hw=0261203117 sw=1267357529 oem=021906258AF  (M2.9)
   VW golf 2.8 VR6 AAA...bin   -> hw=0261200496 sw=1267357205 oem=021906258A   (M2.9)
   1992_964C2...bin             -> hw=0261200473 sw=1267357006 oem=18124030     (M2.3/Porsche 964)
+  Opel Calibra 2.0T M2.7 32KB  -> hw=0261203014 sw=1267357220  (reversed-string Format D)
+  Opel Astra C20XE M2.8 64KB   -> hw=0261203017 sw=1267357369  (Opel Format C)
+  Opel Calibra V6 M2.8 128KB   -> hw=0261203080 sw=1267358003  (Opel Format C)
+  Opel Omega 3.0 V6 M2.81 64KB -> hw=0261203589 sw=1267358933  (Opel Format C + DAMOS fallback)
 """
 
 import hashlib
@@ -123,9 +137,11 @@ class BoschM2xExtractor(BaseManufacturerExtractor):
     HW and SW are stored as plain ASCII in the MOTOR label block — no
     reversed-digit encoding like M1.x/M3.x.
 
-    Two label formats:
+    Four label formats:
       Format A (standard):  '<VAG_PART>    MOTOR    PMC <HW><SW>'
       Format B (Porsche):   'M<rev>MOTRONIC<model><part><HW><XX><SW>'
+      Format C (Opel):      b'\xff{3+} <HW_10> <SW_10> ...'
+      Format D (Opel M2.7): b'dx<HW_reversed><SW_reversed>'
     """
 
     # -----------------------------------------------------------------------
@@ -138,7 +154,7 @@ class BoschM2xExtractor(BaseManufacturerExtractor):
 
     @property
     def supported_families(self) -> List[str]:
-        return ["M2.9", "M2.3"]
+        return ["M2.9", "M2.3", "M2.7", "M2.8", "M2.81"]
 
     # -----------------------------------------------------------------------
     # Detection
@@ -266,6 +282,16 @@ class BoschM2xExtractor(BaseManufacturerExtractor):
         if b"MOTRONIC" in search_area:
             return "M2.3"
 
+        # DAMOS-style fallback — Opel Omega 3.0 V6 has the family marker
+        # '"0000000M2.q' where 'q' (0x71) is not a digit, so the primary
+        # regex above misses it.  The DAMOS ident block stored in the same
+        # bin encodes the true variant as '/M2.<digits>/' (e.g. '/M2.81/').
+        # Take only the first digit to normalise sub-variants (81 -> '8').
+        m_damos = re.search(rb"/M2\.(\d+)/", search_area)
+        if m_damos:
+            digits = m_damos.group(1).decode("ascii")
+            return f"M2.{digits[0]}"
+
         return None
 
     # -----------------------------------------------------------------------
@@ -331,5 +357,36 @@ class BoschM2xExtractor(BaseManufacturerExtractor):
             hw = m_b.group(3).decode("ascii", errors="ignore")
             sw = m_b.group(4).decode("ascii", errors="ignore")
             return hw, sw, oem
+
+        # --- Format C: Opel M2.8/M2.81 — 0xFF-padded ident block ---
+        # The HW and SW numbers are stored as plain ASCII decimal strings
+        # delimited by single spaces, inside a region filled with 0xFF bytes.
+        # Layout: b'\xff{3+} <HW_10> <SW_10> <...>\xff...'
+        # HW always starts with '0261'; SW starts with '1267' or '2227'.
+        # No OEM part number is present in the Opel format.
+        m_c = re.search(
+            rb"\xff{3,} (0261\d{6}) ((?:1267|2227)\d{6}) ",
+            search_region,
+        )
+        if m_c:
+            hw = m_c.group(1).decode("ascii", errors="ignore")
+            sw = m_c.group(2).decode("ascii", errors="ignore")
+            return hw, sw, None
+
+        # --- Format D: Opel M2.7 32KB — reversed-string ident ---
+        # Ident is stored with each 10-digit number reversed char-by-char,
+        # prefixed with the two-byte marker 'dx'.
+        # e.g. b'dx4103021620022753762121132409JP'
+        #   group 1 = '4103021620'  ->  [::-1] = '0261203014'  (hw)
+        #   group 2 = '0227537621'  ->  [::-1] = '1267357220'  (sw)
+        # Validation ensures the reversal produced plausible Bosch idents.
+        m_d = re.search(rb"dx(\d{10})(\d{10})", search_region)
+        if m_d:
+            hw = m_d.group(1).decode("ascii", errors="ignore")[::-1]
+            sw = m_d.group(2).decode("ascii", errors="ignore")[::-1]
+            if hw.startswith("0261") and (
+                sw.startswith("1267") or sw.startswith("2227")
+            ):
+                return hw, sw, None
 
         return None, None, None

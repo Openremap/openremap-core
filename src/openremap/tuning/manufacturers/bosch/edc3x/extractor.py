@@ -87,7 +87,38 @@ exist depending on the vehicle manufacturer integration:
     No 1037/2287/2537 SW number exists in any EDC 3.x binary.
 
 ════════════════════════════════════════════════════════════════════════════
-  Detection strategy (five phases, shared across both formats)
+  FORMAT 3 — Opel calibration block
+════════════════════════════════════════════════════════════════════════════
+  Used by: Opel diesel ECUs (Astra/Vectra era), same EDC 3.x hardware platform
+           e.g. 0281001634 (LLL/HHH chip variants, 001632h/001632l chips)
+
+  The 7-digit calibration number is stored in the ident region and anchored
+  by specific sentinel bytes immediately preceding the ASCII 'U' (0x55) byte:
+
+    Pattern: (?:\\xff{4,}|\\xaa)U([A-Z]{1,2})(\\d{7})
+
+  Where 0x55 (ASCII 'U') is the literal anchor, followed by 1–2 uppercase
+  letters forming the internal SW code/bank designator, then the 7-digit
+  calibration number directly.
+
+  Real examples (from binary inspection):
+    LLL chip: \\xff{7} U A 0770164 Loq^   (cal = "0770164", SW code = "A")
+    HHH chip: \\xff{14} \\xaa U A A 0077770 0117733 ...
+                                         (cal = "0770164", SW code = "A")
+
+  Fields extracted:
+    SW code (group 1)      : 1–2 uppercase letters  → ecu_variant
+    Calibration (group 2)  : 7-digit number          → software_version
+    HW number              : recovered via re.search(rb'0281\\d{6}', data)
+                             → hardware_number (if present in binary)
+    oem_part               : always None (not stored in this format)
+
+  Detection: Opel EDC3 bins pass the Phase 5 (0xC3 fill ratio > 15%) check.
+  The ident parser (Format 3) is invoked as a third fallback in extract()
+  only when both VAG (Format 1) and BMW (Format 2) parsers find nothing.
+
+════════════════════════════════════════════════════════════════════════════
+  Detection strategy (five phases, shared across all formats)
 ════════════════════════════════════════════════════════════════════════════
 
   Phase 1 — Size gate.
@@ -141,6 +172,10 @@ exist depending on the vehicle manufacturer integration:
     0281001445  5331C5  7786887  EDC3  256KB (c3-fill, BMW 5331xx block)
     0281010205  3150    7687887  EDC3  128KB HI chip (c3-fill, 3150 block)
     0281010205  53C0    7887768  EDC3  128KB LO chip (c3-fill, 53xx block)
+
+  Opel (Format 3):
+    0281001634 LLL  A  0770164  EDC3  128KB (Opel Format 3, c3-fill)
+    0281001634 HHH  A  0770164  EDC3  128KB (Opel Format 3, c3-fill)
 """
 
 import hashlib
@@ -164,7 +199,6 @@ SUPPORTED_SIZES: frozenset[int] = frozenset({0x20000, 0x40000, 0x80000})
 # ---------------------------------------------------------------------------
 
 EXCLUSION_SIGNATURES: List[bytes] = [
-    b"TSW",  # EDC15 Format-A toolchain marker
     b"EDC15",  # EDC15 explicit family string
     b"EDC16",  # EDC16 explicit family string
     b"EDC17",  # EDC17 explicit family string
@@ -309,6 +343,75 @@ IDENT_PATTERN_BMW_128: re.Pattern = re.compile(
 )
 
 # ---------------------------------------------------------------------------
+# Opel calibration block regex (Format 3)
+# ---------------------------------------------------------------------------
+# Matches the Opel-style ident embedded in 128KB/256KB c3-fill bins.
+#
+# The calibration number and SW code/bank designator are anchored by a run
+# of 0xFF bytes (≥ 4) or a single 0xAA byte, immediately followed by the
+# ASCII 'U' (0x55) sentinel.
+#
+# Capture groups:
+#   1 : SW code / bank designator  e.g. "A"       (1–2 uppercase letters)
+#   2 : 7-digit calibration number e.g. "0770164"
+#
+# Real observations (two sentinel variants):
+#   LLL chip: ... \xff{7} U  A  0770164 Loq^
+#             sentinel = \xff{4+} U  (U is part of the sentinel)
+#             group 1  = A  (SW code)
+#             group 2  = 0770164
+#
+#   HHH chip: ... \xff{7} \xaa  A  0770164 Hiq_
+#             sentinel = \xaa  (no U; \xaa precedes the SW code directly)
+#             group 1  = A  (SW code)
+#             group 2  = 0770164
+#
+# The alternation (?:\xff{4,}U|\xaa) handles both sentinel styles:
+#   - \xff{4,}U  matches the LLL/LO-chip sentinel ending with ASCII 'U'
+#   - \xaa       matches the HHH/HI-chip sentinel byte 0xAA
+# ---------------------------------------------------------------------------
+
+IDENT_PATTERN_OPEL: re.Pattern = re.compile(rb"(?:\xff{4,}U|\xaaU?)([A-Z]{1,2})(\d{7})")
+
+# ---------------------------------------------------------------------------
+# Opel 256KB doubled-char ident block (Format 4)
+# ---------------------------------------------------------------------------
+# Opel diesel 256KB bins store the calibration code in a doubled-char block
+# at ~0x10020:
+#   each ASCII char appears twice → de-double every 2 bytes
+#   Format: [letter×2][digit×2]{7} → sw_code=letter, cal_id=7 digits
+#
+# Two sentinel variants exist depending on the ECU toolchain:
+#   \x55\xaa  — bins with TSW at 0xC000 (Frontera / Vectra / Zafira early)
+#   \xaa\x55  — bins with "ST W" at 0xC000 (Astra 2.0DTI, 0281001874)
+# Both are accepted via the alternation (?:\x55\xaa|\xaa\x55).
+#
+# Regex uses back-references to enforce doubling:
+#   group 1 = sw_code letter   groups 2–8 = individual cal digits
+#
+# Real examples:
+#   0281001633 → 55 aa 41 41 30 30 37 37 37 37 30 30 31 31 36 36 34 34
+#                → sentinel \x55\xaa  sw_code=A  cal=0770164
+#   0281010026 → 55 aa 41 41 30 30 37 37 37 37 30 30 31 31 37 37 33 33
+#                → sentinel \x55\xaa  sw_code=A  cal=0770173
+#   0281001874 → aa 55 41 41 30 30 37 37 37 37 30 30 31 31 37 37 33 33
+#                → sentinel \xaa\x55  sw_code=A  cal=0770173
+# ---------------------------------------------------------------------------
+IDENT_PATTERN_OPEL_256: re.Pattern = re.compile(
+    rb"(?:\x55\xaa|\xaa\x55)"
+    rb"([A-Z])\1"  # doubled letter prefix      → group 1
+    rb"([A-Z0-9])\2"  # doubled cal char 1          → group 2
+    rb"([A-Z0-9])\3"  # doubled cal char 2          → group 3
+    rb"([A-Z0-9])\4"  # doubled cal char 3          → group 4
+    rb"([A-Z0-9])\5"  # doubled cal char 4          → group 5
+    rb"([A-Z0-9])\6"  # doubled cal char 5          → group 6
+    rb"([A-Z0-9])\7"  # doubled cal char 6          → group 7
+    rb"([A-Z0-9])\8"  # doubled cal char 7 (may be letter e.g. 'B') → group 8
+)
+
+OPEL_256_TSW_REGION: slice = slice(0xBFC0, 0xC040)
+
+# ---------------------------------------------------------------------------
 # Raw-strings region: last 512 bytes
 # ---------------------------------------------------------------------------
 RAW_STRINGS_TAIL: int = 512
@@ -318,11 +421,12 @@ class BoschEDC3xExtractor(BaseManufacturerExtractor):
     """
     Extractor for Bosch EDC 3.x ECU binaries.
 
-    Handles VAG and non-VAG (BMW) diesel ROMs from the 1993–2000 era.
+    Handles VAG, BMW and Opel diesel ROMs from the 1993–2000 era.
 
-    Two ident formats are supported:
+    Three ident formats are supported:
       Format 1 — VAG "HEX" block (IDENT_PATTERN_VAG)
       Format 2 — BMW numeric block (IDENT_PATTERN_BMW_256 / IDENT_PATTERN_BMW_128)
+      Format 3 — Opel calibration block (IDENT_PATTERN_OPEL)
 
     Detection uses up to five phases (see module docstring for full detail).
     """
@@ -364,6 +468,12 @@ class BoschEDC3xExtractor(BaseManufacturerExtractor):
             if excl in data:
                 return False
 
+        # Reject if TSW appears at the EDC15 Format-A offset — those are EDC15
+        # bins, not EDC3x.  TSW at other offsets (e.g. 0xC000 Opel variant) is
+        # acceptable and will be positively detected in Phase 6 below.
+        if b"TSW" in data[0x7FC0:0x8060]:
+            return False
+
         # Phase 2b — reject Format-B EDC15 bins that carry a 1037 SW number
         if EDC15_SW_PREFIX in data:
             return False
@@ -392,6 +502,10 @@ class BoschEDC3xExtractor(BaseManufacturerExtractor):
         if c3_ratio >= C3_FILL_THRESHOLD:
             return True
 
+        # Phase 6 — Opel 256KB: TSW at 0xC000 (pre-EDC15 Opel toolchain)
+        if len(data) == 0x40000 and b"TSW" in data[OPEL_256_TSW_REGION]:
+            return True
+
         return False
 
     # -----------------------------------------------------------------------
@@ -402,9 +516,9 @@ class BoschEDC3xExtractor(BaseManufacturerExtractor):
         """
         Extract all identifying information from a Bosch EDC 3.x binary.
 
-        Tries the VAG ident parser first, then the BMW ident parser.
-        When both fail (fallback-detected bins), all identification fields
-        are returned as None.
+        Tries the VAG ident parser first, then the BMW ident parser, then
+        the Opel ident parser. When all three fail (fallback-detected bins
+        with no parseable ident), identification fields are returned as None.
 
         Returns a dict fully compatible with ECUIdentifiersSchema.
         """
@@ -440,6 +554,28 @@ class BoschEDC3xExtractor(BaseManufacturerExtractor):
         if software_version is None and hardware_number is None:
             oem_part, hardware_number, software_version, ecu_variant = (
                 self._parse_ident_bmw(data)
+            )
+
+        # Try Format 4 (Opel 256KB doubled-char) BEFORE Format 3.
+        # Format 3's IDENT_PATTERN_OPEL can accidentally match the raw
+        # doubled bytes (the \xaa\x55 sentinel at 0x10020 triggers
+        # \xaaU? in the pattern) and return a corrupted cal ID such as
+        # "0077770" instead of the correct de-doubled "0770173".
+        # Format 4 is tried first for all files once VAG and BMW fail —
+        # its back-reference regex is specific enough to avoid false
+        # positives on BMW or VAG bins whose ident sits outside the
+        # 0x10000–0x10100 window.  This replaces the old TSW-at-0xC000
+        # routing that missed bins with "ST W" at 0xC000.
+        if software_version is None and hardware_number is None:
+            oem_part, hardware_number, software_version, ecu_variant = (
+                self._parse_ident_opel_256(data)
+            )
+
+        # Fall back to Opel simple cal block (Format 3) if Format 4 also
+        # found nothing (128KB split-ROM chips and other non-256KB Opel bins).
+        if software_version is None and hardware_number is None:
+            oem_part, hardware_number, software_version, ecu_variant = (
+                self._parse_ident_opel(data)
             )
 
         result["oem_part_number"] = oem_part
@@ -560,6 +696,93 @@ class BoschEDC3xExtractor(BaseManufacturerExtractor):
         Returns (None, None, None, None) if no BMW SW block is found.
         """
         m = self._find_bmw_sw_block(data)
+        if m is None:
+            return None, None, None, None
+
+        sw_code = m.group(1).decode("ascii", errors="ignore").strip()
+        cal_number = m.group(2).decode("ascii", errors="ignore").strip()
+
+        if not sw_code or not cal_number:
+            return None, None, None, None
+
+        # Recover HW number: first plain ASCII "0281xxxxxx" in the binary
+        hardware_number: Optional[str] = None
+        hw_match = re.search(rb"0281\d{6}", data)
+        if hw_match:
+            hardware_number = hw_match.group(0).decode("ascii", errors="ignore")
+
+        return None, hardware_number, cal_number, sw_code
+
+    # -----------------------------------------------------------------------
+    # Internal — Opel 256KB doubled-char ident parser (Format 4)
+    # -----------------------------------------------------------------------
+
+    def _parse_ident_opel_256(
+        self, data: bytes
+    ) -> Tuple[Optional[str], Optional[str], Optional[str], Optional[str]]:
+        """
+        Parse the Opel 256KB doubled-char ident block (Format 4).
+
+        Searches a 256-byte window at 0x10000–0x10100 for the doubled-char
+        pattern anchored by 0x55 0xAA.  Each character is stored twice;
+        back-references enforce this.  The 7-digit cal number and 1-letter
+        SW code are extracted by de-doubling.
+
+        HW number recovered from the last 64KB as plain ASCII.
+
+        Returns (oem_part, hardware_number, software_version, ecu_variant).
+        """
+        window = data[0x10000:0x10100]
+        m = IDENT_PATTERN_OPEL_256.search(window)
+        if not m:
+            return None, None, None, None
+
+        sw_code = m.group(1).decode("ascii", errors="ignore")
+        cal_id = "".join(
+            m.group(i).decode("ascii", errors="ignore") for i in range(2, 9)
+        )
+
+        if not sw_code or not re.match(r"[A-Z0-9]{7}$", cal_id):
+            return None, None, None, None
+
+        hardware_number: Optional[str] = None
+        hw_m = re.search(rb"028[01]\d{6}", data[-65536:])
+        if hw_m:
+            hardware_number = hw_m.group(0).decode("ascii", errors="ignore")
+
+        return None, hardware_number, cal_id, sw_code
+
+    # -----------------------------------------------------------------------
+    # Internal — Opel ident parser (Format 3)
+    # -----------------------------------------------------------------------
+
+    def _parse_ident_opel(
+        self, data: bytes
+    ) -> Tuple[Optional[str], Optional[str], Optional[str], Optional[str]]:
+        """
+        Parse the Opel-style calibration block (Format 3).
+
+        Searches the full binary for IDENT_PATTERN_OPEL:
+          (?:\\xff{4,}|\\xaa)U([A-Z]{1,2})(\\d{7})
+
+        The 0x55 ('U') byte is a literal anchor; group 1 is the 1–2
+        uppercase-letter SW code/bank designator (returned as ecu_variant);
+        group 2 is the 7-digit calibration number (returned as
+        software_version).
+
+        Observed in real Opel EDC3 bins:
+          LLL chip: \\xff{7} U A 0770164 Loq^  → SW code "A", cal "0770164"
+          HHH chip: \\xff{14} \\xaa U A A ...  → SW code "A", cal "0770164"
+
+        The HW number (0281xxxxxx), when present, is recovered as plain ASCII
+        via a separate re.search() over the full binary — the same strategy
+        used by _parse_ident_bmw().
+
+        Returns (oem_part, hardware_number, software_version, ecu_variant).
+        oem_part is always None (not embedded in this format).
+        Returns (None, None, None, None) if no match is found.
+        """
+        m = IDENT_PATTERN_OPEL.search(data)
         if m is None:
             return None, None, None, None
 

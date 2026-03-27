@@ -439,7 +439,7 @@ class BoschM3xExtractor(BaseManufacturerExtractor):
         The '0000000' portion of the marker is itself the last 7 digits of
         the ident run — they overlap.
 
-        Layout example (Citroën ZX 2.0 16V, 0261200218):
+        Layout A — MP3.2 / later PSA (Citroën ZX 2.0 16V, 0261200218):
             offset 0x1FDD:  =  8  1  2  0  0  2  1  6  2  0  0  9  3  7  5
             offset 0x1FED:  3  7  6  2  1  0  0  0  0  0  0  0  M  3  .  X
             (where '=' is a non-digit delimiter)
@@ -449,13 +449,34 @@ class BoschM3xExtractor(BaseManufacturerExtractor):
             digits[10:20] = '0937537621'  → reversed → '1267357390'  (SW)
             digits[20:27] = '0000000'     (padding/overlap with marker)
 
+        In this layout the 27-digit run is contiguous and ends at the marker,
+        so the backward walk from the marker collects all 27 digits in one pass.
+
+        Layout B — MP3.1 / early PSA (Peugeot 106 M3.1, e.g. 0261200203):
+            offset 0x1EFA:  9f 3b 03 9f 19 01 XX XX   (8-byte header, non-ASCII)
+            offset 0x1F02:  3  0  2  0  0  2  1  6  2  0  3  4  2  7  5  3  7  6  2  1
+            offset 0x1F16:  ff ff ff ...               (0xFF fill)
+            ...
+            offset 0x4F27:  22                         (0x22 = '"', non-digit)
+            offset 0x4F28:  0  0  0  0  0  0  0  M  3  .  X ...  (marker)
+
+        In this layout the 20-digit ident is stored at a fixed file offset
+        with non-ASCII code bytes between it and the marker. The backward walk
+        from the marker stops immediately at the '"' byte (0x22), yielding only
+        '0000000' (7 chars) — fewer than the 20 needed. A whole-file scan is
+        required as a fallback.
+
         Algorithm:
           1. Find b'0000000M3' in data.
           2. Walk backward from marker_pos+7 (the byte just before 'M'),
              collecting consecutive ASCII digit bytes.
-          3. The forward-reading slice data[start : marker_pos+7] is the
-             ident_num string passed to _resolve_hardware_number / _resolve_software_version.
-          4. Search the whole file for the PSA calibration block
+          3. If ≥ 20 digits were collected (Layout A), use that run as ident_num.
+          4. Otherwise (Layout B fallback): scan the whole file for exactly-20-
+             digit runs (not preceded or followed by another digit). For each,
+             attempt to decode HW (digits[0:10][::-1]) and SW (digits[10:20][::-1])
+             and accept the first run where HW starts with '0261' and SW starts
+             with a recognised prefix ('1267' or '2227').
+          5. Search the whole file for the PSA calibration block
              (\\d+/\\d+/MP[\\d.]+/[^\\x00\\xff\\r\\n]{5,100}) and use it as dme_code.
 
         Returns:
@@ -482,6 +503,26 @@ class BoschM3xExtractor(BaseManufacturerExtractor):
         # Need at least 20 digits to decode both HW (first 10) and SW (next 10)
         if len(digit_run) >= 20:
             ident_num = digit_run
+
+        # --- Step 2b: Layout B fallback for early MP3.1 bins ---
+        # In early PSA bins (e.g. Peugeot 106, MP3.1) the 20-digit ident is
+        # stored at a fixed file offset far from the marker, separated by
+        # non-ASCII opcode bytes. The backward walk above only captures the 7
+        # zeros embedded in the marker itself, so ident_num is still None here.
+        # Scan the whole file for a run of exactly 20 consecutive ASCII digits
+        # (not preceded or followed by another digit) that decodes to a valid
+        # Bosch HW number (reversed digits[0:10] starts with '0261') and a
+        # recognised SW prefix (reversed digits[10:20] starts with '1267' or '2227').
+        if ident_num is None:
+            for fm in re.finditer(rb"(?<![0-9])[0-9]{20}(?![0-9])", data):
+                digits = fm.group(0).decode("ascii")
+                hw_candidate = digits[0:10][::-1]
+                sw_candidate = digits[10:20][::-1]
+                if hw_candidate.startswith("0261") and sw_candidate.startswith(
+                    ("1267", "2227")
+                ):
+                    ident_num = digits
+                    break
 
         # --- Step 3: search for PSA calibration block anywhere in the file ---
         cal_pattern = rb"\d+/\d+/MP[\d.]+/[^\x00\xff\r\n]{5,100}"

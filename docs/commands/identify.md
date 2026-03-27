@@ -208,7 +208,7 @@ All of the following should be filled in for a fully supported, original binary:
 ## Notes
 
 - `openremap identify` is completely read-only. It never modifies the file.
-- Only `.bin` and `.ori` files are accepted. Passing any other extension exits with an error.
+- Only `.bin` and `.ori` files are accepted. Passing any other extension prints a warning and proceeds anyway — it does not exit with an error.
 - The `--output` flag strips terminal colour codes automatically when writing to a file, so the saved text is clean and readable in any editor.
 - The confidence score in the JSON output is a raw numeric value for programmatic use. The `tier` field is the human-readable label.
 

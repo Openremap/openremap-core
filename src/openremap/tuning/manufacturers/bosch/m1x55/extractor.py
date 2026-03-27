@@ -68,10 +68,15 @@ from openremap.tuning.manufacturers.base import BaseManufacturerExtractor
 # ---------------------------------------------------------------------------
 
 # The M1.55 family token — present at a fixed offset (0x08005) in every
-# known bin and nowhere in any other Bosch family binary.
+# known Alfa bin and nowhere in any other Bosch family binary.
 DETECTION_SIGNATURE: bytes = b"M1.55"
 
-# Supported file size — M1.55 bins are always exactly 128KB.
+# Opel M1.5.5 family token — same 128KB size, different dot notation.
+# Located in the DAMOS descriptor at ~0x0D82F (not 0x08005).
+# e.g. "47/1/M1.5.5/06/100.0/DAMOS++/3007/300703/260799"
+DETECTION_SIGNATURE_OPEL: bytes = b"M1.5.5"
+
+# Supported file size — M1.55 and M1.5.5 bins are always exactly 128KB.
 SUPPORTED_SIZE: int = 0x20000  # 128KB
 
 # ---------------------------------------------------------------------------
@@ -121,6 +126,21 @@ DESCRIPTOR_PATTERN: bytes = (
 IDENT_REGION: slice = slice(-0x800, None)  # last 2KB — ident block always here
 HW_SW_PATTERN: bytes = rb"(0261\d{6}) (1037\d{6,10})"
 
+# ---------------------------------------------------------------------------
+# Opel M1.5.5 ident block (middle of file, ~0xD801)
+# ---------------------------------------------------------------------------
+# Format: "<sw8> <prefix><hw10><checksum><variant>  <build>"
+# e.g.   "90532609 RY026120405828SA4143  B97003"
+#   sw8    : 8-digit GM/Opel internal SW number  e.g. "90532609"
+#   prefix : 2-char dataset code                 e.g. "RY"
+#   hw10   : 10-digit Bosch HW number            e.g. "0261204058"
+#
+# Group 1 = software_version (8-digit GM number)
+# Group 2 = hardware_number  (0261xxxxxx)
+# ---------------------------------------------------------------------------
+OPEL_M155_IDENT_REGION: slice = slice(0xD000, 0xE000)
+OPEL_M155_IDENT_PATTERN: bytes = rb"(\d{8}) [A-Z]{2}(0261\d{6})"
+
 
 class BoschM1x55Extractor(BaseManufacturerExtractor):
     """
@@ -138,7 +158,7 @@ class BoschM1x55Extractor(BaseManufacturerExtractor):
 
     @property
     def supported_families(self) -> List[str]:
-        return ["M1.55"]
+        return ["M1.55", "M1.5.5"]
 
     # -----------------------------------------------------------------------
     # Detection
@@ -146,19 +166,17 @@ class BoschM1x55Extractor(BaseManufacturerExtractor):
 
     def can_handle(self, data: bytes) -> bool:
         """
-        Return True if this binary is a Bosch Motronic M1.55 ECU.
+        Return True if this binary is a Bosch Motronic M1.55 or M1.5.5 ECU.
 
         Three-phase check:
           1. Reject immediately if any exclusion signature is present in the
              first 512KB — prevents claiming EDC/ME7/M3.x bins that might
              incidentally contain the "M1" substring.
           2. Reject if file size is not exactly 128KB (0x20000).
-             M1.55 bins are always this size; no other Bosch family handled
-             here uses 128KB with the M1.55 family token.
-          3. Accept if the b"M1.55" family token is present in the first 64KB.
-             The token is at a fixed offset (0x08005) in all observed bins.
-             Searching the first 64KB (rather than pinning to 0x08005 exactly)
-             provides a small tolerance for any dump-offset variation.
+             Both M1.55 and M1.5.5 bins are always this size.
+          3. Accept if the b"M1.55" family token is present in the first 64KB
+             (Alfa Romeo variants), OR if b"M1.5.5" is present anywhere in
+             the binary (Opel variants — token is at ~0x0D82F, past 64KB mark).
         """
         search_area = data[:0x80000]
 
@@ -171,8 +189,8 @@ class BoschM1x55Extractor(BaseManufacturerExtractor):
         if len(data) != SUPPORTED_SIZE:
             return False
 
-        # Phase 3 — M1.55 family token in first 64KB
-        return DETECTION_SIGNATURE in data[:0x10000]
+        # Phase 3 — family token: Alfa M1.55 (first 64KB) or Opel M1.5.5 (anywhere)
+        return DETECTION_SIGNATURE in data[:0x10000] or DETECTION_SIGNATURE_OPEL in data
 
     # -----------------------------------------------------------------------
     # Extraction
@@ -199,21 +217,33 @@ class BoschM1x55Extractor(BaseManufacturerExtractor):
             max_results=20,
         )
 
-        # --- Step 2: Parse the slash-delimited family descriptor ---
-        descriptor = self._parse_descriptor(data)
+        # --- Step 2: Detect variant (Alfa M1.55 vs Opel M1.5.5) ---
+        is_opel = DETECTION_SIGNATURE_OPEL in data
 
-        ecu_family = descriptor.get("family") or "M1.55"
-        ecu_variant = descriptor.get("ecu_variant")
-        dataset_number = descriptor.get("dataset")
-        calibration_id = descriptor.get("ecu_variant")  # same field, dual use
+        if is_opel:
+            # Opel M1.5.5 — DAMOS descriptor at ~0xD82F, GM-style ident block
+            ecu_family = "M1.5.5"
+            ecu_variant = None
+            dataset_number = None
+            calibration_id = None
+        else:
+            # Alfa M1.55 — slash-delimited descriptor at 0x8005
+            descriptor = self._parse_descriptor(data)
+            ecu_family = descriptor.get("family") or "M1.55"
+            ecu_variant = descriptor.get("ecu_variant")
+            dataset_number = descriptor.get("dataset")
+            calibration_id = descriptor.get("ecu_variant")  # same field, dual use
 
         result["ecu_family"] = ecu_family
         result["ecu_variant"] = ecu_variant
         result["dataset_number"] = dataset_number
         result["calibration_id"] = calibration_id
 
-        # --- Step 3: HW and SW from the ident block near end of file ---
-        hardware_number, software_version = self._parse_hw_sw(data)
+        # --- Step 3: HW and SW from the appropriate ident block ---
+        if is_opel:
+            hardware_number, software_version = self._parse_opel_m155_ident(data)
+        else:
+            hardware_number, software_version = self._parse_hw_sw(data)
         result["hardware_number"] = hardware_number
         result["software_version"] = software_version
 
@@ -225,8 +255,8 @@ class BoschM1x55Extractor(BaseManufacturerExtractor):
 
         # --- Step 5: Build match key ---
         result["match_key"] = self.build_match_key(
-            ecu_family=ecu_family,
-            ecu_variant=ecu_variant,
+            ecu_family=result["ecu_family"],
+            ecu_variant=result["ecu_variant"],
             software_version=software_version,
         )
 
@@ -296,6 +326,36 @@ class BoschM1x55Extractor(BaseManufacturerExtractor):
     # -----------------------------------------------------------------------
     # Internal — HW / SW resolver
     # -----------------------------------------------------------------------
+
+    def _parse_opel_m155_ident(
+        self, data: bytes
+    ) -> tuple[Optional[str], Optional[str]]:
+        """
+        Parse the Opel M1.5.5 ident block located at ~0xD801.
+
+        Format: "<sw8> <prefix2><hw10><checksum2><variant>  <build>"
+        e.g.   "90532609 RY026120405828SA4143  B97003"
+
+        Group 1 = 8-digit GM/Opel internal SW number → software_version
+        Group 2 = 10-digit Bosch HW number (0261xxxxxx) → hardware_number
+
+        The ident is duplicated at 0xD801 and 0x1D801; searching the
+        OPEL_M155_IDENT_REGION (0xD000–0xE000) finds the first copy.
+
+        Returns (hardware_number, software_version), either may be None.
+        """
+        region = data[OPEL_M155_IDENT_REGION]
+        m = re.search(OPEL_M155_IDENT_PATTERN, region)
+        if not m:
+            return None, None
+
+        sw = m.group(1).decode("ascii", errors="ignore").strip()
+        hw = m.group(2).decode("ascii", errors="ignore").strip()
+
+        software_version = sw if sw and not re.match(r"^0+$", sw) else None
+        hardware_number = hw if hw and not re.match(r"^0+$", hw) else None
+
+        return hardware_number, software_version
 
     def _parse_hw_sw(self, data: bytes) -> tuple[Optional[str], Optional[str]]:
         """

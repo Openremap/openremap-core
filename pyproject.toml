@@ -10,7 +10,7 @@ package = true
 
 [project]
 name = "openremap"
-version = "0.3.0"
+version = "0.3.1"
 description = "ECU binary analysis and patching toolkit — diff, validate, and apply tuning recipes to automotive ECU binaries."
 readme = "README.md"
 license = { file = "LICENSE" }
@@ -41,11 +41,12 @@ openremap = "openremap.cli.main:app"
 Homepage = "https://github.com/Pinelo92/openremap"
 Repository = "https://github.com/Pinelo92/openremap"
 "Bug Tracker" = "https://github.com/Pinelo92/openremap/issues"
-Changelog = "https://github.com/Pinelo92/openremap/releases"
+Changelog = "https://github.com/Pinelo92/openremap/blob/main/CHANGELOG.md"
 
 [dependency-groups]
 dev = [
     "pytest>=8.3.0",
+    "pytest-cov>=6.0.0",
 ]
 
 [tool.pytest.ini_options]

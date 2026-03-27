@@ -8,6 +8,9 @@ Covers the Bosch EDC16 family:
               e.g. Alfa 159 2.4 JTDM, Alfa GT 1.9 JTD 150HP
   EDC16U1/U31 — VAG PD (Pumpe-Düse / unit-injector) engines (2004–2008)
               e.g. Audi A3/A4 1.9 TDI BKC/BKE, 2.0 TDI BKD (03G906016xx)
+  EDC16C9   — Opel/GM Vectra-C, Signum, Astra-H diesel (2004–2006)
+              e.g. Opel Vectra CDTI 120PS (0281013409, sw=1037A50286)
+              active_start = 0xC0000; DECAFE at 0xC003D
 
 EDC16 sits between EDC15 and EDC17 generationally:
   - CPU: Infineon TriCore TC1766 (C8) or TC1796 (C39/U-series)
@@ -71,6 +74,16 @@ Binary structure and file sizes:
     Distinction     : three DECAFE copies at 0x3d / 0x8003d / 0xd003d
                       (vs C8 which has copies at 0x3d / 0x8003d / 0xe003d)
 
+  EDC16C9 — 1MB (0x100000 bytes), Opel/GM common-rail (Vectra-C/Signum/Astra-H):
+    Header magic    : \xde\xca\xfe at 0xC003d  (active_start + 0x3d)
+    SW version      : ASCII "1037xxxxxx" at 0xC0010; the 6-character suffix may
+                      contain uppercase hex digits A–F (e.g. "1037A50286")
+    ECU family str  : "EDC16C9/..." when present in calibration area
+    Active section  : starts at 0xC0000
+    DECAFE copies   : 0x3d / 0x8003d / 0xC003d
+    Distinction     : third DECAFE copy at 0xC003d (vs C8 at 0xe003d,
+                      PD at 0xd003d) is the Opel-layout discriminator
+
   EDC16 sector dump — 256KB (0x40000 bytes):
     A standalone calibration/active-section-only read. The file begins
     directly with the active section header — no prefix or padding.
@@ -91,13 +104,16 @@ most authoritative source for the ecu_variant (e.g. "EDC16C8").
 
 Pattern reference:
 
-  SOFTWARE VERSION    "1037367333"  "1037383773"
+  SOFTWARE VERSION    "1037367333"  "1037383773"  "1037A50286"
     Bosch internal software calibration identifier.
-    Format: 1037 + 6 digits (10 digits total — always exactly 10 in EDC16).
+    Format: 1037 + 6 alphanumeric characters (10 characters total).
     Stored as plain ASCII at active_start + 0x10 in every known variant.
-    Note: the bytes immediately following the 10-digit SW may be printable
-    ASCII (e.g. "P379U8...") — the pattern must match exactly 6 digits
-    after "1037" to avoid returning a 13-digit false value.
+    Note: the bytes immediately following the 10-character SW may be printable
+    ASCII (e.g. "P379U8...") — the pattern must match exactly 6 characters
+    after "1037" to avoid returning a 13-character false value.
+    Note: Opel EDC16C9 bins use alphanumeric suffixes (uppercase hex
+    digits A–F allowed), e.g. "1037A50286". Pattern uses [\\dA-Fa-f]{6,10}
+    to cover both purely numeric and alphanumeric SW versions.
     The primary matching key.
 
   ECU FAMILY STRING   "EDC16C8/009/C277/..."
@@ -107,6 +123,13 @@ Pattern reference:
 
   HARDWARE NUMBER     not stored as plain ASCII in any observed EDC16 binary.
     Always None — the HW number appears in the filename convention only.
+
+Verified samples:
+  Alfa 147 1.9JTDM 140HP  0281010455_1037367333.bin                       -> EDC16C8  sw=1037367333
+  Alfa 159 2.4JTDM        0281013417_1037383773.bin                       -> EDC16C39 sw=1037383773
+  A3 1.9TDI BKC           03G906016J_1037369261.bin                       -> EDC16 PD sw=1037369261
+  A3 2.0TDI BKD           03G906016FF_1037370634.bin                      -> EDC16 PD sw=1037370634
+  Opel Vectra CDTI 120PS  0281013409_1037A50286_Vectra_CDTI_120PS.bin     -> EDC16C9  sw=1037A50286
 """
 
 from typing import Dict, Optional
@@ -119,9 +142,13 @@ from typing import Dict, Optional
 # ---------------------------------------------------------------------------
 
 PATTERNS: Dict[str, bytes] = {
-    # SW version — "1037" + 6–10 digits
+    # SW version — "1037"/"1039" + 6–10 alphanumeric hex characters
     # Stored as plain ASCII in both C8 and C39 bins at the fixed active offset.
-    "software_version": rb"1037\d{6,10}",
+    # [\dA-Fa-f] covers Opel EDC16C9 bins that use uppercase hex in the suffix
+    # (e.g. "1037A50286") as well as all-numeric versions ("1037367333").
+    # "1039" prefix covers PSA/Peugeot-Citroën EDC16C34 variants
+    # (e.g. Peugeot 3008 1.6 HDI SW "1039398238").
+    "software_version": rb"103[79][\dA-Fa-f]{6,10}",
     # ECU family slash-delimited descriptor
     # e.g. "EDC16C8/009/C277/ /110000_000/____________________/19810101/"
     #      "EDC16C39/009/C456/ /010000_000/____________________/19810101/"
@@ -152,15 +179,21 @@ PATTERNS: Dict[str, bytes] = {
 # Each EDC16 variant has its active (calibration) section at a fixed start.
 # SW is always at active_start + 0x10; magic is at active_start + 0x3d.
 #
-# For 1MB bins TWO layouts exist:
+# For 1MB bins FOUR layouts exist:
 #   C8  layout : active_start = 0x40000  (DECAFE mirror at 0xe003d)
+#   C9  layout : active_start = 0xc0000  (DECAFE at 0xc003d — Opel Vectra/Signum/Astra-H)
 #   PD  layout : active_start = 0xd0000  (DECAFE mirror at 0x8003d / 0x3d)
+#   C31 early  : active_start = 0x20000  (DECAFE at 0x2003d — BMW E46 320D M47TU, 2003–2005)
+#                e.g. BMW 320D 150HP 0281010565 sw=1037361830
+#                Family string near end of file at ~0x0fe63f ("EDC16C31/999/X000/...")
 #
-# Distinguishing C8 from PD for 1MB bins:
-#   C8  has DECAFE at 0xe003d  (0x40000 + 0xa0000 = 0xe0000 → +0x3d)
-#   PD  has DECAFE at 0xd003d  (0xd0000 + 0x3d) — NOT at 0xe003d
-#   Both have DECAFE at 0x3d and 0x8003d (boot/mirror sections).
-#   The third copy position (0xe003d vs 0xd003d) is the discriminator.
+# Distinguishing C8 / C9 / PD / C31-early for 1MB bins:
+#   C8       has DECAFE at 0xe003d  (0x40000 + 0xa0000 → +0x3d)
+#   C9       has DECAFE at 0xc003d  (0xc0000 + 0x3d) — Opel-layout discriminator
+#   PD       has DECAFE at 0xd003d  (0xd0000 + 0x3d) — NOT at 0xe003d
+#   C31 early has DECAFE at 0x2003d  (0x20000 + 0x3d) — BMW E46-layout discriminator
+#   C8 and C9 both have DECAFE at 0x3d and 0x8003d (boot/mirror sections).
+#   The third copy position (0xe003d / 0xc003d / 0xd003d / 0x2003d) is the discriminator.
 #
 # ACTIVE_STARTS_BY_SIZE maps size → list of candidate active starts.
 # The extractor tries each in order, accepting the first where DECAFE is
@@ -168,12 +201,17 @@ PATTERNS: Dict[str, bytes] = {
 # ---------------------------------------------------------------------------
 
 ACTIVE_STARTS_BY_SIZE: Dict[int, list] = {
-    0x100000: [0x40000, 0xD0000],  # 1MB: C8 layout first, then PD layout
+    0x100000: [
+        0x40000,
+        0xC0000,
+        0xD0000,
+        0x20000,
+    ],  # 1MB: C8 first, then C9 (Opel), then PD, then BMW E46 C31 early
     0x200000: [
         0x40000,
         0xC0000,
         0x1C0000,
-    ],  # 2MB: BMW C31/C35 first, then X6, then Alfa C39
+    ],  # 2MB: BMW C31/C35 first, then X6, then Alfa C39 / PSA EDC16C34
     0x40000: [0x0000],  # 256KB sector dump: active section IS the file
     0xF0000: [0x30000],  # 983040: truncated C31/C35 (missing first 64KB)
 }
@@ -204,14 +242,24 @@ SW_WINDOW: int = 16
 # ECU family string search regions
 # ---------------------------------------------------------------------------
 # The EDC16 family string lives in the calibration data area of the active
-# section. Searching the last 256KB (0x40000 bytes) covers all known variants.
+# section. Searching the last 256KB (0x40000 bytes) covers C8, C9, C39, and
+# VAG PD variants. For BMW EDC16C31/C35 2MB files the family string lives
+# near the 0xC0000 mirror section (~0x0C06F3), outside the last-256KB window;
+# the extractor handles this via Priority 2b in _resolve_ecu_variant() using
+# a dynamically computed active-extended region (see "active_extended" below).
 # ---------------------------------------------------------------------------
 
 SEARCH_REGIONS: Dict[str, slice] = {
-    # Last 256KB — EDC16 family string is always here in both C8 and C39
+    # Last 256KB — EDC16 family string is always here in C8, C9, C39, VAG PD
     "cal_area": slice(-0x40000, None),
     # Full binary — used as last-resort SW fallback
     "full": slice(0x0000, None),
+    # Active-extended — dynamically computed in extractor; documented here for reference.
+    # For BMW C31/C35 2MB: active_start=0x40000, window=0x40000..0x140000
+    # For BMW X6  C35 2MB: active_start=0xc0000,  window=0xc0000..0x1c0000
+    # For Alfa C39     2MB: active_start=0x1c0000, window=0x1c0000..0x200000 (same as cal_area)
+    # Not a real slice — the extractor builds data[active_start : active_start+0x100000].
+    # "active_extended": <dynamically computed>,
 }
 
 # ---------------------------------------------------------------------------
@@ -249,9 +297,11 @@ MAGIC_OFFSETS_BY_SIZE: Dict[int, list] = {
     0x100000: [
         0x4003D,
         0x8003D,
+        0xC003D,
         0xD003D,
         0xE003D,
-    ],  # 1MB: C8 has 0xe003d, PD has 0xd003d
+        0x2003D,  # BMW E46 320D EDC16C31 early layout (active_start=0x20000)
+    ],  # 1MB: C8→0xe003d, EDC16C9 (Opel)→0xc003d, PD→0xd003d, BMW E46→0x2003d
     0x200000: [0x4003D, 0xC003D, 0x1C003D],  # 2MB: BMW C31/C35, X6, Alfa C39
     0x40000: [0x003D],  # 256KB sector dump
     0xF0000: [0x3003D],  # 983040 truncated C31/C35
@@ -293,7 +343,7 @@ EXCLUSION_SIGNATURES: list[bytes] = [
 ]
 
 # Supported file sizes — anything outside this set is rejected immediately.
-#   0x100000 — 1MB      : EDC16C8 and EDC16 VAG PD
+#   0x100000 — 1MB      : EDC16C8, EDC16C9 (Opel) and EDC16 VAG PD
 #   0x200000 — 2MB      : EDC16C39 (Alfa) and EDC16C31/C35 (BMW)
 #   0x040000 — 256KB    : EDC16 sector/active-section-only dump
 #   0x0F0000 — 983040   : EDC16C31/C35 truncated (missing first 64KB boot sector)
