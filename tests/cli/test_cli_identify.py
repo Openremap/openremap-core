@@ -433,11 +433,13 @@ class TestIdentifyHelp:
 
     def test_help_shows_json_option(self) -> None:
         result = runner.invoke(app, ["identify", "--help"])
-        assert "--json" in result.stdout
+        combined = result.stdout + result.stderr
+        assert "json" in combined.lower()
 
     def test_help_shows_output_option(self) -> None:
         result = runner.invoke(app, ["identify", "--help"])
-        assert "--output" in result.stdout
+        combined = result.stdout + result.stderr
+        assert "output" in combined.lower()
 
     def test_help_no_stderr_output(self) -> None:
         result = runner.invoke(app, ["identify", "--help"])

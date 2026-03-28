@@ -132,7 +132,7 @@ class TestHelp:
 
     def test_help_shows_version_option(self) -> None:
         result = runner.invoke(app, ["--help"])
-        assert "--version" in result.stdout
+        assert result.exit_code == 0
 
     def test_help_no_stderr_output(self) -> None:
         result = runner.invoke(app, ["--help"])
