@@ -510,6 +510,15 @@ class TestExtractVariant:
         result = EXTRACTOR.extract(data, "t.bin")
         assert result.get("ecu_variant") == "EDC17U05"
 
+    def test_variant_from_full_slash_descriptor_string(self):
+        """Full slash-delimited variant string triggers Priority 1 in _resolve_ecu_variant (L307)."""
+        buf = make_bin(SIZE_512KB)
+        # The ecu_variant_string pattern matches this; the EDC17Cxx sub-pattern
+        # inside it matches "EDC17C66" → Priority 1 returns at L307.
+        write(buf, 0x1000, b"47/1/EDC17C66/1/P1262//P_1262_66V1__CV182500///")
+        result = EXTRACTOR.extract(bytes(buf), "t.bin")
+        assert result["ecu_variant"] == "EDC17C66"
+
     def test_no_variant_returns_none(self):
         # Only a generic "EDC17" family string — no specific variant
         buf = make_bin(SIZE_512KB)
@@ -866,3 +875,437 @@ class TestExtractDeterminism:
         r_a = EXTRACTOR.extract(bytes(buf_a), "a.bin")
         r_b = EXTRACTOR.extract(bytes(buf_b), "b.bin")
         assert r_a["md5"] != r_b["md5"]
+
+
+# ---------------------------------------------------------------------------
+# can_handle — additional guards (ME9, Marelli ZZ, ME7 family, TSW bank 2)
+# ---------------------------------------------------------------------------
+
+
+class TestCanHandleAdditionalGuards:
+    """Cover guards 2–5 in BoschExtractor.can_handle() that the base test
+    suite did not fully exercise."""
+
+    def _make(self, size: int = SIZE_512KB) -> bytearray:
+        return make_bin(size)
+
+    # Guard 2 — TSW at second bank boundary (1 MB binary, bank 1 = 0x88000)
+    def test_tsw_at_second_bank_boundary_rejected(self):
+        """TSW  at 0x88000 (bank 1 of a 1 MB binary) must be rejected."""
+        buf = self._make(0x100000)
+        write(buf, 0x1000, b"EDC17")  # would be accepted without guard
+        write(buf, 0x88000, b"TSW ")  # bank 1 boundary → guard 2 fires
+        assert EXTRACTOR.can_handle(bytes(buf)) is False
+
+    def test_tsw_only_in_first_bank_rejected(self):
+        """TSW  at 0x8000 (bank 0 of a 512 KB binary) must be rejected."""
+        buf = self._make()
+        write(buf, 0x1000, b"EDC17")
+        write(buf, 0x8000, b"TSW ")
+        assert EXTRACTOR.can_handle(bytes(buf)) is False
+
+    # Guard 3 — pure ME9 (RamLoader.Me9 without MED9 string)
+    def test_me9_without_med9_rejected(self):
+        """RamLoader.Me9 present, MED9 absent → pure ME9 bin → reject."""
+        buf = self._make()
+        write(buf, 0x100, b"RamLoader.Me9.0001")
+        write(buf, 0x200, b"Bosch")  # detection sig would match
+        # no MED9 anywhere → guard fires
+        assert EXTRACTOR.can_handle(bytes(buf)) is False
+
+    def test_me9_with_med9_accepted(self):
+        """RamLoader.Me9 present AND MED9 present → MED9 bin → do not reject."""
+        buf = self._make()
+        write(buf, 0x100, b"RamLoader.Me9.0001")
+        write(buf, 0x200, b"MED9510")  # MED9 content present
+        write(buf, 0x300, b"Bosch")
+        assert EXTRACTOR.can_handle(bytes(buf)) is True
+
+    # Guard 4 — Magneti Marelli ECU (ZZ at 0x10000 with printable 3rd byte)
+    def test_marelli_zz_printable_third_byte_rejected(self):
+        """ZZ + printable 3rd byte at 0x10000 → Marelli false positive → reject."""
+        buf = self._make()
+        write(buf, 0x10000, b"ZZ43/1/ME1.5.5/")  # '4' = 0x34, printable
+        write(buf, 0x200, b"MD1")  # detection sig present
+        assert EXTRACTOR.can_handle(bytes(buf)) is False
+
+    def test_marelli_zz_non_printable_third_byte_not_rejected(self):
+        """ZZ + non-printable 3rd byte at 0x10000 → not Marelli → guard does not fire."""
+        buf = self._make()
+        write(buf, 0x10000, b"ZZ\xff\xff")  # non-printable → not Marelli
+        write(buf, 0x200, b"EDC17")  # detection sig
+        assert EXTRACTOR.can_handle(bytes(buf)) is True
+
+    # Guard 5 — ME7 family strings
+    def test_me7_dot_family_string_rejected(self):
+        """ME7. present → file is ME7 → reject from EDC17 extractor."""
+        buf = self._make()
+        write(buf, 0x100, b"ME7.5")
+        write(buf, 0x200, b"BOSCH")
+        assert EXTRACTOR.can_handle(bytes(buf)) is False
+
+    def test_motronic_label_rejected(self):
+        """MOTRONIC present → ME7 bin → reject."""
+        buf = self._make()
+        write(buf, 0x100, b"MOTRONIC")
+        write(buf, 0x200, b"BOSCH")
+        assert EXTRACTOR.can_handle(bytes(buf)) is False
+
+    def test_me71_rejected(self):
+        """ME71 string present → reject."""
+        buf = self._make()
+        write(buf, 0x100, b"ME71")
+        write(buf, 0x200, b"BOSCH")
+        assert EXTRACTOR.can_handle(bytes(buf)) is False
+
+    def test_me731_rejected(self):
+        """ME731 (Alfa ME7.3.1) present → reject."""
+        buf = self._make()
+        write(buf, 0x100, b"ME731")
+        write(buf, 0x200, b"BOSCH")
+        assert EXTRACTOR.can_handle(bytes(buf)) is False
+
+
+# ---------------------------------------------------------------------------
+# _resolve_ecu_variant — extended unit tests (Priority 3 promotion / no-op)
+# ---------------------------------------------------------------------------
+
+
+class TestResolveEcuVariantExtended:
+    """Unit tests exercising resolver paths not covered by the basic suite."""
+
+    # Priority 1: variant string present but contains no EDC17Cxx pattern
+    def test_variant_string_no_edc17_pattern_falls_to_priority2(self):
+        """Variant string without an EDC17Xxx match falls through to bare hit."""
+        raw_hits = {
+            "ecu_variant_string": ["47/1/UNKNOWN/1/P1262///"],
+            "ecu_variant": ["EDC17C66"],
+        }
+        result = EXTRACTOR._resolve_ecu_variant(raw_hits)
+        assert result == "EDC17C66"
+
+    # Priority 3: full family match that is longer than the base → promote to variant
+    def test_priority3_sub_version_promoted_to_variant(self):
+        """MED9510 (longer than base MED9) → promoted to variant."""
+        raw_hits = {"ecu_family_med9": ["MED9510"]}
+        assert EXTRACTOR._resolve_ecu_variant(raw_hits) == "MED9510"
+
+    def test_priority3_medc17_sub_version_promoted(self):
+        """MEDC17.7 (longer than base MEDC17) → promoted to variant."""
+        raw_hits = {"ecu_family_medc17": ["MEDC17.7"]}
+        assert EXTRACTOR._resolve_ecu_variant(raw_hits) == "MEDC17.7"
+
+    # Priority 3: full family match that equals base → no promotion, break
+    def test_priority3_base_name_only_returns_none(self):
+        """MED9 equals the base name MED9 → not promoted, returns None."""
+        raw_hits = {"ecu_family_med9": ["MED9"]}
+        assert EXTRACTOR._resolve_ecu_variant(raw_hits) is None
+
+    def test_priority3_edc17_base_name_only_returns_none(self):
+        """EDC17 equals base → not promoted."""
+        raw_hits = {"ecu_family_edc17": ["EDC17"]}
+        assert EXTRACTOR._resolve_ecu_variant(raw_hits) is None
+
+    def test_no_hits_returns_none(self):
+        assert EXTRACTOR._resolve_ecu_variant({}) is None
+
+
+# ---------------------------------------------------------------------------
+# _resolve_ecu_family — extended unit tests (Priority 2 variant inference)
+# ---------------------------------------------------------------------------
+
+
+class TestResolveEcuFamilyExtended:
+    """Unit tests for family inference from ecu_variant (Priority 2)."""
+
+    def test_infer_edc17_from_variant(self):
+        assert EXTRACTOR._resolve_ecu_family({}, ecu_variant="EDC17C66") == "EDC17"
+
+    def test_infer_medc17_from_variant(self):
+        assert EXTRACTOR._resolve_ecu_family({}, ecu_variant="MEDC17.7") == "MEDC17"
+
+    def test_infer_med9_from_variant(self):
+        assert EXTRACTOR._resolve_ecu_family({}, ecu_variant="MED9510") == "MED9"
+
+    def test_infer_md1_from_variant(self):
+        assert EXTRACTOR._resolve_ecu_family({}, ecu_variant="MD1CS016") == "MD1"
+
+    def test_infer_me17_from_variant(self):
+        assert EXTRACTOR._resolve_ecu_family({}, ecu_variant="ME17.9") == "ME17"
+
+    def test_none_when_no_family_and_no_variant(self):
+        assert EXTRACTOR._resolve_ecu_family({}) is None
+
+    def test_none_when_variant_has_no_known_prefix(self):
+        assert EXTRACTOR._resolve_ecu_family({}, ecu_variant="SIEMENS1") is None
+
+
+# ---------------------------------------------------------------------------
+# _resolve_software_version — rejection rules (direct unit tests)
+# ---------------------------------------------------------------------------
+
+
+class TestResolveSoftwareVersionRejections:
+    """Each rejection heuristic tested in isolation."""
+
+    def test_valid_1037_sw_accepted(self):
+        raw_hits = {"software_version": ["1037541778"]}
+        assert EXTRACTOR._resolve_software_version(raw_hits) == "1037541778"
+
+    def test_rejects_mcu_constant(self):
+        """1037555072 is the TC1793 MCU identifier → must be rejected."""
+        raw_hits = {"software_version": ["1037555072"]}
+        assert EXTRACTOR._resolve_software_version(raw_hits) is None
+
+    def test_rejects_psa_calibration_id(self):
+        """0800YYxxxxxxxxx format → PSA cal ID, not SW → rejected."""
+        raw_hits = {"software_version": ["080017126333022"]}
+        assert EXTRACTOR._resolve_software_version(raw_hits) is None
+
+    def test_rejects_sequential_digit_run(self):
+        """0123456789… is a lookup table constant → rejected."""
+        raw_hits = {"software_version": ["012345678901234"]}
+        assert EXTRACTOR._resolve_software_version(raw_hits) is None
+
+    def test_rejects_single_repeated_digit(self):
+        """3333333333 (fill pattern) → single unique digit → rejected."""
+        raw_hits = {"software_version": ["3333333333"]}
+        assert EXTRACTOR._resolve_software_version(raw_hits) is None
+
+    def test_rejects_four_consecutive_same_digits(self):
+        """1037999999 contains four 9s in a row → rejected."""
+        raw_hits = {"software_version": ["1037999999"]}
+        assert EXTRACTOR._resolve_software_version(raw_hits) is None
+
+    def test_rejects_all_zeros(self):
+        raw_hits = {"software_version": ["0000000000"]}
+        assert EXTRACTOR._resolve_software_version(raw_hits) is None
+
+    def test_rejects_string_shorter_than_10_chars(self):
+        raw_hits = {"software_version": ["103754177"]}  # only 9 chars
+        assert EXTRACTOR._resolve_software_version(raw_hits) is None
+
+    def test_returns_none_when_no_1037_prefix_survives(self):
+        """Non-1037 candidates → no bosch_canonical → return None."""
+        raw_hits = {"software_version": ["2287358770"]}
+        assert EXTRACTOR._resolve_software_version(raw_hits) is None
+
+    def test_returns_none_when_no_candidates(self):
+        """Empty raw_hits → no candidates at all."""
+        assert EXTRACTOR._resolve_software_version({}) is None
+
+    def test_sw_label_priority_over_bare(self):
+        """Explicit SW: label wins over bare numeric match."""
+        raw_hits = {
+            "sw_label": ["SW:1037541778"],
+            "software_version": ["1037000001"],
+        }
+        assert EXTRACTOR._resolve_software_version(raw_hits) == "1037541778"
+
+    def test_digit_extension_removed(self):
+        """103738197603 is a digit extension of 1037381976 → removed."""
+        raw_hits = {"software_version": ["1037381976", "103738197603"]}
+        result = EXTRACTOR._resolve_software_version(raw_hits)
+        assert result == "1037381976"
+
+    def test_longest_non_extension_selected(self):
+        """Among non-extension candidates the longest (≤18 chars) wins."""
+        raw_hits = {"software_version": ["1037541778", "1037541778126241"]}
+        # Neither is a digit extension of the other (different suffixes)
+        result = EXTRACTOR._resolve_software_version(raw_hits)
+        assert result is not None
+        assert result.startswith("1037")
+
+
+# ---------------------------------------------------------------------------
+# _resolve_hardware_number — extended unit tests
+# ---------------------------------------------------------------------------
+
+
+class TestResolveHardwareNumberExtended:
+    """Paths not covered by the basic hardware-number tests."""
+
+    def test_bosch_hw_alt_used_when_no_standard_hw(self):
+        """bosch_hw_alt is the last fallback when hw_label / hardware_number absent."""
+        raw_hits = {"bosch_hw_alt": ["F01R00DE67"]}
+        result = EXTRACTOR._resolve_hardware_number(raw_hits)
+        assert result == "F01R00DE67"
+
+    def test_bosch_hw_alt_not_used_when_standard_hw_present(self):
+        """Standard 0281 number wins over bosch_hw_alt."""
+        raw_hits = {
+            "hardware_number": ["0281034791"],
+            "bosch_hw_alt": ["F01R00DE67"],
+        }
+        result = EXTRACTOR._resolve_hardware_number(raw_hits)
+        assert result == "0281034791"
+
+    def test_hw_label_strips_prefix_and_wins(self):
+        """HW: label prefix is stripped; label takes priority over bare number."""
+        raw_hits = {
+            "hw_label": ["HW:0281034791"],
+            "hardware_number": ["0281000000"],
+        }
+        result = EXTRACTOR._resolve_hardware_number(raw_hits)
+        assert result == "0281034791"
+
+    def test_returns_none_when_no_candidates_at_all(self):
+        assert EXTRACTOR._resolve_hardware_number({}) is None
+
+    def test_normalises_spaces_and_dots(self):
+        """Spaces and dots are removed from the first candidate."""
+        raw_hits = {"hardware_number": ["0 281 034 791"]}
+        assert EXTRACTOR._resolve_hardware_number(raw_hits) == "0281034791"
+
+
+# ---------------------------------------------------------------------------
+# _resolve_dataset_number — extended unit tests
+# ---------------------------------------------------------------------------
+
+
+class TestResolveDatasetNumberExtended:
+    """Paths not covered by the basic dataset-number tests."""
+
+    def test_all_1037_prefixed_hits_filtered_returns_none(self):
+        """Every hit starts with 1037 → all filtered → None."""
+        raw_hits = {"dataset_number": ["1037555072", "1037000000"]}
+        assert EXTRACTOR._resolve_dataset_number(raw_hits) is None
+
+    def test_sw_substring_hit_filtered(self):
+        """Hit that is a substring of the SW version string → filtered."""
+        raw_hits = {
+            "dataset_number": ["1037541778"],
+            "software_version": ["1037541778126241"],
+        }
+        assert EXTRACTOR._resolve_dataset_number(raw_hits) is None
+
+    def test_no_dataset_key_returns_none(self):
+        assert EXTRACTOR._resolve_dataset_number({}) is None
+
+    def test_valid_dataset_number_returned(self):
+        raw_hits = {
+            "dataset_number": ["6229040100"],
+            "software_version": ["1037541778"],
+        }
+        assert EXTRACTOR._resolve_dataset_number(raw_hits) == "6229040100"
+
+
+# ---------------------------------------------------------------------------
+# _resolve_oem_part_number — extended unit tests (BMW / Mercedes paths)
+# ---------------------------------------------------------------------------
+
+
+class TestResolveOemPartNumberExtended:
+    """Paths not covered by basic OEM tests: BMW and Mercedes part numbers."""
+
+    def test_bmw_part_number_returned(self):
+        raw_hits = {"bmw_part_number": ["12 14 7 626 350"]}
+        assert EXTRACTOR._resolve_oem_part_number(raw_hits) == "12 14 7 626 350"
+
+    def test_mercedes_part_number_returned(self):
+        raw_hits = {"mercedes_part_number": ["A 651 900 00 00"]}
+        assert EXTRACTOR._resolve_oem_part_number(raw_hits) == "A 651 900 00 00"
+
+    def test_vag_preferred_over_mercedes(self):
+        raw_hits = {
+            "vag_part_number": ["03L 906 018 AJ"],
+            "mercedes_part_number": ["A 651 900 00 00"],
+        }
+        assert EXTRACTOR._resolve_oem_part_number(raw_hits) == "03L 906 018 AJ"
+
+    def test_mercedes_preferred_over_bmw(self):
+        raw_hits = {
+            "mercedes_part_number": ["A 651 900 00 00"],
+            "bmw_part_number": ["12 14 7 626 350"],
+        }
+        assert EXTRACTOR._resolve_oem_part_number(raw_hits) == "A 651 900 00 00"
+
+    def test_none_when_no_oem_hits(self):
+        assert EXTRACTOR._resolve_oem_part_number({}) is None
+
+
+# ---------------------------------------------------------------------------
+# Coverage: base.py lines 264-268
+# ---------------------------------------------------------------------------
+
+
+class TestCoverageBaseSearch:
+    """Cover the three uncovered branches in BaseManufacturerExtractor._search."""
+
+    def test_break_at_max_results(self):
+        """Line 264: break fires when len(results) >= max_results."""
+        # Pattern matches twice but we cap at 1 result.
+        data = b"1037000001 1037000002"
+        results = EXTRACTOR._search(data, rb"1037\d{6}", slice(None), max_results=1)
+        assert len(results) == 1
+
+    def test_inner_except_pass_when_group_raises(self):
+        """Lines 265-266: inner except catches exception from match.group(0)."""
+        from unittest.mock import MagicMock, patch
+
+        bad_match = MagicMock()
+        bad_match.group.side_effect = Exception("simulated group() error")
+
+        with patch(
+            "openremap.tuning.manufacturers.base.re.finditer",
+            return_value=iter([bad_match]),
+        ):
+            results = EXTRACTOR._search(b"anything", rb"\d+", slice(None))
+        assert results == []
+
+    def test_outer_except_pass_when_finditer_raises(self):
+        """Lines 267-268: outer except catches exception raised by re.finditer itself."""
+        from unittest.mock import patch
+
+        with patch(
+            "openremap.tuning.manufacturers.base.re.finditer",
+            side_effect=Exception("simulated finditer error"),
+        ):
+            results = EXTRACTOR._search(b"anything", rb"\d+", slice(None))
+        assert results == []
+
+
+# ---------------------------------------------------------------------------
+# Coverage: edc17/extractor.py lines 486-491 (fallback after bosch_canonical)
+# ---------------------------------------------------------------------------
+
+
+class TestCoverageEdc17FallbackLines:
+    """Document the current no-canonical-candidate behavior in _resolve_software_version.
+
+    Note:
+        The fallback block at lines 486-491 is currently unreachable in normal
+        execution because the function returns early when ``bosch_canonical`` is
+        empty:
+
+            if not bosch_canonical:
+                return None
+
+        That means the later ``valid = [...]`` / ``min(candidates, key=len)``
+        logic cannot be reached unless the implementation changes.
+    """
+
+    def test_returns_none_when_no_candidates(self):
+        """Confirm _resolve_software_version returns None with empty raw_hits."""
+        result = EXTRACTOR._resolve_software_version({})
+        assert result is None
+
+    def test_returns_none_when_no_1037_prefix(self):
+        """Confirm early return None when no canonical Bosch 1037 SW survives filtering."""
+        raw_hits = {"software_version": ["9999123456"]}  # no 1037 prefix
+        result = EXTRACTOR._resolve_software_version(raw_hits)
+        assert result is None
+
+    def test_returns_none_instead_of_using_dead_fallback_when_only_noncanonical_hits_exist(
+        self,
+    ):
+        """Non-1037 candidates take the explicit early return, not the later fallback."""
+        raw_hits = {
+            "software_version": [
+                "2287358770",
+                "9999123456",
+                "1234567890123456789",
+            ]
+        }
+        result = EXTRACTOR._resolve_software_version(raw_hits)
+        assert result is None

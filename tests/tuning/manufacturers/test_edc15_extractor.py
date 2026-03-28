@@ -1040,3 +1040,69 @@ class TestExtractRawStrings:
         # TSW string is in the data region (last 256KB) and is long enough to appear
         # (min_length=8 in extract_raw_strings)
         assert isinstance(result["raw_strings"], list)
+
+
+# ---------------------------------------------------------------------------
+# Coverage: edc15/extractor.py lines 212, 230, 253
+# ---------------------------------------------------------------------------
+
+
+class TestCoverageEdc15ResolverEdges:
+    """
+    Cover three uncovered return/continue paths in the SW and HW resolvers.
+    All tests call the private resolver methods directly to isolate the
+    specific branches without going through the full extract() pipeline.
+    """
+
+    # ------------------------------------------------------------------
+    # Line 212 — _resolve_software_version: continue for duplicate SW value
+    # ------------------------------------------------------------------
+
+    def test_duplicate_sw_string_triggers_continue(self):
+        """Line 212: 'continue' fires when val is already in seen (deduplication)."""
+        # Build data where 1037123456 appears twice with identical value.
+        # First occurrence is surrounded by 0xC3 fill so it goes to
+        # candidates_c3; the second occurrence is the duplicate that hits
+        # the 'val in seen' branch and takes the continue path.
+        prefix = b"\xc3" * 6
+        sw = b"1037123456"
+        suffix = b"\xc3" * 6
+        # First occurrence (surrounded by c3 fill)
+        block = prefix + sw + suffix
+        # Second occurrence (plain, separated by non-c3 bytes)
+        block2 = b"\x00" * 20 + sw + b"\x00" * 20
+        data = block + block2
+
+        raw_hits = {"software_version": ["1037123456"]}
+        result = EXTRACTOR._resolve_software_version(raw_hits, data)
+        # Should still return the value (from the first hit)
+        assert result == "1037123456"
+
+    # ------------------------------------------------------------------
+    # Line 230 — _resolve_software_version: return None at end of function
+    # ------------------------------------------------------------------
+
+    def test_return_none_when_no_1037_in_data(self):
+        """Line 230: return None when raw_hits has a hit but data has no 1037 pattern."""
+        # raw_hits must be non-empty to pass the early 'if not hits: return None'
+        # guard, but data contains no 1037-prefixed bytes so re.finditer
+        # produces no candidates — both candidates_c3 and candidates_any stay
+        # empty, and the function falls through to the bare 'return None'.
+        raw_hits = {"software_version": ["1037000000"]}
+        data = b"\x00" * 512  # no 1037... anywhere
+        result = EXTRACTOR._resolve_software_version(raw_hits, data)
+        assert result is None
+
+    # ------------------------------------------------------------------
+    # Line 253 — _resolve_hardware_number: return None when all hits are in SW
+    # ------------------------------------------------------------------
+
+    def test_return_none_when_all_hw_hits_are_substrings_of_sw(self):
+        """Line 253: return None when every HW hit is a substring of software_version."""
+        # The resolver iterates over hits and returns the first hit that is NOT
+        # a substring of software_version.  When all hits appear inside sw, the
+        # for-loop exhausts without returning and falls to 'return None'.
+        raw_hits = {"hardware_number": ["0281010332"]}
+        software_version = "PREFIX0281010332SUFFIX"
+        result = EXTRACTOR._resolve_hardware_number(raw_hits, software_version)
+        assert result is None

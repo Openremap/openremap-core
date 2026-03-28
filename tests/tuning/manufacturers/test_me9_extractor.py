@@ -776,3 +776,73 @@ class TestBuildMatchKey:
         )
         assert key is not None
         assert key.endswith(f"::{sw}")
+
+
+# ---------------------------------------------------------------------------
+# Coverage: me9/extractor.py lines 285-286
+# ---------------------------------------------------------------------------
+
+
+class TestCoverageMe9FindGroup1:
+    """Cover the except (IndexError, AttributeError) branch in _find_group1."""
+
+    def test_except_index_error_returns_none(self):
+        """Lines 285-286: except (IndexError, AttributeError): pass fires when
+        match.group(1) raises IndexError.
+
+        _find_group1 calls m.group(1) inside a try block.  When that call
+        raises IndexError (or AttributeError) the except clause silently
+        catches it and execution falls through to 'return None'.
+        """
+        from unittest.mock import MagicMock, patch
+
+        mock_match = MagicMock()
+        mock_match.group.side_effect = IndexError("no such group")
+
+        with patch(
+            "openremap.tuning.manufacturers.bosch.me9.extractor.re.search",
+            return_value=mock_match,
+        ):
+            result = EXTRACTOR._find_group1(
+                b"dummy data " * 100,
+                rb"(1037\d+)",
+                slice(None),
+            )
+
+        assert result is None
+
+    def test_except_attribute_error_returns_none(self):
+        """Lines 285-286: except (IndexError, AttributeError) also catches
+        AttributeError raised by match.group(1).
+        """
+        from unittest.mock import MagicMock, patch
+
+        mock_match = MagicMock()
+        mock_match.group.side_effect = AttributeError("no group method")
+
+        with patch(
+            "openremap.tuning.manufacturers.bosch.me9.extractor.re.search",
+            return_value=mock_match,
+        ):
+            result = EXTRACTOR._find_group1(
+                b"dummy data " * 100,
+                rb"(1037\d+)",
+                slice(None),
+            )
+
+        assert result is None
+
+    def test_find_group1_returns_none_when_no_match(self):
+        """_find_group1 returns None when re.search finds no match."""
+        result = EXTRACTOR._find_group1(
+            b"\x00" * 100,
+            rb"(1037\d{6,10})",
+            slice(None),
+        )
+        assert result is None
+
+    def test_find_group1_returns_value_when_match_found(self):
+        """_find_group1 returns decoded group(1) when the pattern matches."""
+        data = b"prefix 1037383785 suffix"
+        result = EXTRACTOR._find_group1(data, rb"(1037\d{6,10})", slice(None))
+        assert result == "1037383785"

@@ -9,8 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.3.1] — 2026-03-27
 
-Patch release focused on extractor correctness for Opel, PSA/Citroën, and Porsche
-binaries discovered during a contested-folder audit of real-world bins.
+Patch release with two main areas of work: extractor correctness for Opel,
+PSA/Citroën, and Porsche binaries discovered during a corpus audit; and a
+rework of the CLI commands including two new commands (`commands`, `families`),
+renamed `validate` sub-commands, and a rebuilt one-shot `tune` workflow.
 
 ### Fixed
 

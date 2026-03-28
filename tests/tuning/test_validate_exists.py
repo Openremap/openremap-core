@@ -667,3 +667,39 @@ class TestCheckMatchKey:
     def test_empty_ecu_block_returns_none(self):
         v = make_validator(make_bin(256), [], ecu={})
         assert v.check_match_key() is None
+
+
+# ---------------------------------------------------------------------------
+# check_match_key() — mismatch / exception branches
+# ---------------------------------------------------------------------------
+
+
+class TestCheckMatchKeyMismatch:
+    def test_identify_ecu_raises_exception_returns_none(self):
+        from unittest.mock import patch
+
+        v = make_validator(make_bin(256), [], ecu={"match_key": "EDC17::SOMEVERSION"})
+        with patch("openremap.tuning.services.validate_exists.identify_ecu") as mock_id:
+            mock_id.side_effect = RuntimeError("identification failed")
+            result = v.check_match_key()
+        assert result is None
+
+    def test_matching_key_returns_none(self):
+        from unittest.mock import patch
+
+        recipe_key = "EDC17::SOMEVERSION"
+        v = make_validator(make_bin(256), [], ecu={"match_key": recipe_key})
+        with patch("openremap.tuning.services.validate_exists.identify_ecu") as mock_id:
+            mock_id.return_value = {"match_key": recipe_key}
+            result = v.check_match_key()
+        assert result is None
+
+    def test_mismatched_key_returns_mismatch_string(self):
+        from unittest.mock import patch
+
+        v = make_validator(make_bin(256), [], ecu={"match_key": "EDC17::SOMEVERSION"})
+        with patch("openremap.tuning.services.validate_exists.identify_ecu") as mock_id:
+            mock_id.return_value = {"match_key": "EDC17::DIFFERENTVERSION"}
+            result = v.check_match_key()
+        assert result is not None
+        assert "mismatch" in result.lower()
