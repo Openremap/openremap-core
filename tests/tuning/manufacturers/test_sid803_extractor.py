@@ -34,10 +34,10 @@ Covers:
 
 import hashlib
 
-from openremap.tuning.manufacturers.siemens.sid803.extractor import (
+from openremap.core.manufacturers.siemens.sid803.extractor import (
     SiemensSID803Extractor,
 )
-from openremap.tuning.manufacturers.siemens.sid803.patterns import (
+from openremap.core.manufacturers.siemens.sid803.patterns import (
     DETECTION_SIGNATURES,
     EXCLUSION_SIGNATURES,
     PATTERNS,

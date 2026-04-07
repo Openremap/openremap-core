@@ -47,7 +47,7 @@ import hashlib
 
 import pytest
 
-from openremap.tuning.manufacturers.bosch.edc1.extractor import (
+from openremap.core.manufacturers.bosch.edc1.extractor import (
     EXCLUSION_SIGNATURES,
     IDENT_OFFSET,
     IDENT_PATTERN,

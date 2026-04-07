@@ -57,7 +57,7 @@ import hashlib
 
 import pytest
 
-from openremap.tuning.manufacturers.bosch.motronic_legacy.extractor import (
+from openremap.core.manufacturers.bosch.motronic_legacy.extractor import (
     BoschMotronicLegacyExtractor,
 )
 

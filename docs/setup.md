@@ -126,7 +126,7 @@ uv is not installed or not on your PATH. Follow the install guide for your platf
 uv manages its own Python and does not depend on the system Python. Let uv install the required version:
 
 ```bash
-uv python install 3.14
+uv python install 3.10
 uv sync
 ```
 

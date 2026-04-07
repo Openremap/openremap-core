@@ -40,7 +40,7 @@ Covers:
 
 import hashlib
 
-from openremap.tuning.manufacturers.bosch.mono.extractor import BoschMonoExtractor
+from openremap.core.manufacturers.bosch.mono.extractor import BoschMonoExtractor
 
 EXTRACTOR = BoschMonoExtractor()
 

@@ -197,10 +197,16 @@ class TestMainBlock:
         from unittest.mock import patch
         import openremap.cli.main as _mod
 
-        # Patch typer.Typer.__call__ so that when app() is called inside the
-        # `if __name__ == "__main__":` block, the call is intercepted rather
-        # than launching the real CLI (which would hang or sys.exit).
-        with patch("typer.Typer.__call__", return_value=None) as mock_call:
+        # Pin sys.argv to 2 elements so main() always takes the CLI branch
+        # (len > 1), not the TUI branch (len == 1).  When pytest is invoked
+        # with no extra arguments sys.argv is ['pytest'], which has length 1
+        # and would cause main() to launch the TUI — hanging the test suite.
+        # Patch typer.Typer.__call__ so that the resulting app() call is
+        # intercepted rather than launching the real CLI or sys.exit-ing.
+        with (
+            patch("sys.argv", ["openremap", "--help"]),
+            patch("typer.Typer.__call__", return_value=None) as mock_call,
+        ):
             ns = {"__name__": "__main__"}
             with open(_mod.__file__) as fh:
                 source = fh.read()

@@ -15,7 +15,7 @@ Covers:
 """
 
 from tests.conftest import make_bin, make_bin_with, make_recipe, make_instruction
-from openremap.tuning.services.validate_exists import ECUExistenceValidator, MatchStatus
+from openremap.core.services.validate_exists import ECUExistenceValidator, MatchStatus
 
 
 # ---------------------------------------------------------------------------
@@ -638,7 +638,7 @@ class TestCheckFileSize:
         assert v.check_file_size() is None
 
     def test_no_ecu_block_in_recipe_returns_none(self):
-        from openremap.tuning.services.validate_exists import ECUExistenceValidator
+        from openremap.core.services.validate_exists import ECUExistenceValidator
 
         recipe = {"metadata": {}, "instructions": []}
         v = ECUExistenceValidator(make_bin(256), recipe)
@@ -679,7 +679,7 @@ class TestCheckMatchKeyMismatch:
         from unittest.mock import patch
 
         v = make_validator(make_bin(256), [], ecu={"match_key": "EDC17::SOMEVERSION"})
-        with patch("openremap.tuning.services.validate_exists.identify_ecu") as mock_id:
+        with patch("openremap.core.services.validate_exists.identify_ecu") as mock_id:
             mock_id.side_effect = RuntimeError("identification failed")
             result = v.check_match_key()
         assert result is None
@@ -689,7 +689,7 @@ class TestCheckMatchKeyMismatch:
 
         recipe_key = "EDC17::SOMEVERSION"
         v = make_validator(make_bin(256), [], ecu={"match_key": recipe_key})
-        with patch("openremap.tuning.services.validate_exists.identify_ecu") as mock_id:
+        with patch("openremap.core.services.validate_exists.identify_ecu") as mock_id:
             mock_id.return_value = {"match_key": recipe_key}
             result = v.check_match_key()
         assert result is None
@@ -698,7 +698,7 @@ class TestCheckMatchKeyMismatch:
         from unittest.mock import patch
 
         v = make_validator(make_bin(256), [], ecu={"match_key": "EDC17::SOMEVERSION"})
-        with patch("openremap.tuning.services.validate_exists.identify_ecu") as mock_id:
+        with patch("openremap.core.services.validate_exists.identify_ecu") as mock_id:
             mock_id.return_value = {"match_key": "EDC17::DIFFERENTVERSION"}
             result = v.check_match_key()
         assert result is not None

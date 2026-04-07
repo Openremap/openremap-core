@@ -710,7 +710,7 @@ class TestRenderConfidenceTagDirect:
     def test_with_warnings_includes_warning_text(self):
         """A confidence result with warnings includes ⚠ and the warning text."""
         from openremap.cli.commands.scan import _render_confidence_tag
-        from openremap.tuning.services.confidence import (
+        from openremap.core.services.confidence import (
             ConfidenceResult,
             ConfidenceSignal,
         )
@@ -728,7 +728,7 @@ class TestRenderConfidenceTagDirect:
     def test_without_warnings_returns_tier_only(self):
         """A confidence result without warnings returns just the tier label."""
         from openremap.cli.commands.scan import _render_confidence_tag
-        from openremap.tuning.services.confidence import (
+        from openremap.core.services.confidence import (
             ConfidenceResult,
             ConfidenceSignal,
         )
@@ -754,7 +754,7 @@ class TestBuildReportRowDirect:
             ScanResult,
             DEST_UNKNOWN,
         )
-        from openremap.tuning.services.confidence import (
+        from openremap.core.services.confidence import (
             ConfidenceResult,
             ConfidenceSignal,
         )
@@ -1263,7 +1263,7 @@ class TestScanCLIUncoveredPaths:
         """Confidence tag (including warnings) is shown for SCANNED files (lines 688-692)."""
         from unittest.mock import MagicMock, patch
         from openremap.cli.commands.scan import ScanResult, DEST_SCANNED
-        from openremap.tuning.services.confidence import (
+        from openremap.core.services.confidence import (
             ConfidenceResult,
             ConfidenceSignal,
         )

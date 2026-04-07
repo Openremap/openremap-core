@@ -33,11 +33,11 @@ Covers:
 import hashlib
 import re
 
-from openremap.tuning.manufacturers.siemens.ems2000.extractor import (
+from openremap.core.manufacturers.siemens.ems2000.extractor import (
     SiemensEMS2000Extractor,
     EMS2000_FILE_SIZE,
 )
-from openremap.tuning.manufacturers.siemens.ems2000.patterns import (
+from openremap.core.manufacturers.siemens.ems2000.patterns import (
     EMS2000_HEADER,
     EXCLUSION_SIGNATURES,
     PATTERNS,
@@ -762,7 +762,7 @@ class TestRoundTrip:
 class TestPatternsModule:
     def test_detection_signatures_is_empty(self):
         """EMS2000 has no positive detection signatures."""
-        from openremap.tuning.manufacturers.siemens.ems2000.patterns import (
+        from openremap.core.manufacturers.siemens.ems2000.patterns import (
             DETECTION_SIGNATURES,
         )
 
@@ -783,7 +783,7 @@ class TestPatternsModule:
         assert EMS2000_HEADER == b"\xc0\xf0\x68\xa6"
 
     def test_file_size_constant(self):
-        from openremap.tuning.manufacturers.siemens.ems2000.patterns import (
+        from openremap.core.manufacturers.siemens.ems2000.patterns import (
             EMS2000_FILE_SIZE as PATT_FILE_SIZE,
         )
 

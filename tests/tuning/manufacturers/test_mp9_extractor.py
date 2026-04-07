@@ -25,8 +25,8 @@ import hashlib
 
 import pytest
 
-from openremap.tuning.manufacturers.bosch.mp9.extractor import BoschMP9Extractor
-from openremap.tuning.manufacturers.bosch.mp9.patterns import EXCLUSION_SIGNATURES
+from openremap.core.manufacturers.bosch.mp9.extractor import BoschMP9Extractor
+from openremap.core.manufacturers.bosch.mp9.patterns import EXCLUSION_SIGNATURES
 
 EXTRACTOR = BoschMP9Extractor()
 

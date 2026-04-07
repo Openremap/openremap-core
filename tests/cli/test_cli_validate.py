@@ -839,7 +839,7 @@ class TestValidateWarnLine:
         recipe.write_text(json.dumps(data), encoding="utf-8")
 
         with patch(
-            "openremap.tuning.services.validate_strict.identify_ecu",
+            "openremap.core.services.validate_strict.identify_ecu",
             return_value={"match_key": "ACTUAL::KEY"},
         ):
             result = runner.invoke(

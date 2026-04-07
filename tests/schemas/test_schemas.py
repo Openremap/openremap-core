@@ -1,7 +1,7 @@
 """
 Tests for Pydantic schemas in:
-  - openremap.tuning.schemas.analyzer
-  - openremap.tuning.schemas.patcher
+  - openremap.core.schemas.analyzer
+  - openremap.core.schemas.patcher
 
 Coverage target: 100% of both schema files.
 
@@ -15,7 +15,7 @@ Strategy:
 import pytest
 from pydantic import ValidationError
 
-from openremap.tuning.schemas.analyzer import (
+from openremap.core.schemas.analyzer import (
     AnalysisMetadataSchema,
     AnalysisStatisticsSchema,
     AnalyzerResponseSchema,
@@ -24,7 +24,7 @@ from openremap.tuning.schemas.analyzer import (
     SupportedFamiliesResponseSchema,
     SupportedFamilySchema,
 )
-from openremap.tuning.schemas.patcher import (
+from openremap.core.schemas.patcher import (
     ExistenceSummarySchema,
     MissingInstructionSchema,
     PatchApplyResponseSchema,
@@ -168,19 +168,19 @@ class TestSupportedFamilySchema:
 
     def test_missing_manufacturer_raises(self):
         with pytest.raises(ValidationError):
-            SupportedFamilySchema(family="EDC16", extractor="SomeExtractor")
+            SupportedFamilySchema(family="EDC16", extractor="SomeExtractor")  # type: ignore[call-arg]
 
     def test_missing_family_raises(self):
         with pytest.raises(ValidationError):
-            SupportedFamilySchema(manufacturer="Bosch", extractor="SomeExtractor")
+            SupportedFamilySchema(manufacturer="Bosch", extractor="SomeExtractor")  # type: ignore[call-arg]
 
     def test_missing_extractor_raises(self):
         with pytest.raises(ValidationError):
-            SupportedFamilySchema(manufacturer="Bosch", family="EDC16")
+            SupportedFamilySchema(manufacturer="Bosch", family="EDC16")  # type: ignore[call-arg]
 
     def test_all_fields_missing_raises(self):
         with pytest.raises(ValidationError):
-            SupportedFamilySchema()
+            SupportedFamilySchema()  # type: ignore[call-arg]
 
     def test_different_manufacturers(self):
         for mfr in ("Bosch", "Siemens", "Delphi", "Marelli"):
@@ -219,11 +219,11 @@ class TestSupportedFamiliesResponseSchema:
 
     def test_missing_total_raises(self):
         with pytest.raises(ValidationError):
-            SupportedFamiliesResponseSchema(families=[])
+            SupportedFamiliesResponseSchema(families=[])  # type: ignore[call-arg]
 
     def test_missing_families_raises(self):
         with pytest.raises(ValidationError):
-            SupportedFamiliesResponseSchema(total=0)
+            SupportedFamiliesResponseSchema(total=0)  # type: ignore[call-arg]
 
     def test_multiple_families(self):
         families = [
@@ -239,7 +239,7 @@ class TestSupportedFamiliesResponseSchema:
     def test_accepts_dict_list_for_families(self):
         obj = SupportedFamiliesResponseSchema(
             total=1,
-            families=[
+            families=[  # type: ignore[arg-type]
                 {
                     "manufacturer": "Bosch",
                     "family": "ME7",
@@ -343,12 +343,12 @@ class TestInstructionSchema:
 class TestECUIdentitySchema:
     def test_minimal_valid_instantiation(self):
         """Only file_size and sha256 are required; rest default to None."""
-        obj = ECUIdentitySchema(file_size=262144, sha256=SHA256)
+        obj = ECUIdentitySchema(file_size=262144, sha256=SHA256)  # type: ignore[call-arg]
         assert obj.file_size == 262144
         assert obj.sha256 == SHA256
 
     def test_all_optional_fields_default_to_none(self):
-        obj = ECUIdentitySchema(file_size=262144, sha256=SHA256)
+        obj = ECUIdentitySchema(file_size=262144, sha256=SHA256)  # type: ignore[call-arg]
         assert obj.manufacturer is None
         assert obj.match_key is None
         assert obj.ecu_family is None
@@ -401,22 +401,22 @@ class TestECUIdentitySchema:
 
     def test_missing_file_size_raises(self):
         with pytest.raises(ValidationError):
-            ECUIdentitySchema(sha256=SHA256)
+            ECUIdentitySchema(sha256=SHA256)  # type: ignore[call-arg]
 
     def test_missing_sha256_raises(self):
         with pytest.raises(ValidationError):
-            ECUIdentitySchema(file_size=262144)
+            ECUIdentitySchema(file_size=262144)  # type: ignore[call-arg]
 
     def test_both_required_missing_raises(self):
         with pytest.raises(ValidationError):
-            ECUIdentitySchema()
+            ECUIdentitySchema()  # type: ignore[call-arg]
 
     def test_file_size_is_int(self):
-        obj = ECUIdentitySchema(file_size=65536, sha256=SHA256)
+        obj = ECUIdentitySchema(file_size=65536, sha256=SHA256)  # type: ignore[call-arg]
         assert isinstance(obj.file_size, int)
 
     def test_sha256_is_str(self):
-        obj = ECUIdentitySchema(file_size=65536, sha256=SHA256)
+        obj = ECUIdentitySchema(file_size=65536, sha256=SHA256)  # type: ignore[call-arg]
         assert isinstance(obj.sha256, str)
 
     def test_software_version_field_description_exists(self):
@@ -626,7 +626,7 @@ class TestAnalyzerResponseSchema:
 
     def test_missing_metadata_raises(self):
         with pytest.raises(ValidationError):
-            AnalyzerResponseSchema(
+            AnalyzerResponseSchema(  # type: ignore[call-arg]
                 ecu=ECUIdentitySchema(**_make_ecu_identity()),
                 statistics=AnalysisStatisticsSchema(**_make_statistics()),
                 instructions=[],
@@ -634,7 +634,7 @@ class TestAnalyzerResponseSchema:
 
     def test_missing_ecu_raises(self):
         with pytest.raises(ValidationError):
-            AnalyzerResponseSchema(
+            AnalyzerResponseSchema(  # type: ignore[call-arg]
                 metadata=AnalysisMetadataSchema(**_make_metadata()),
                 statistics=AnalysisStatisticsSchema(**_make_statistics()),
                 instructions=[],
@@ -642,7 +642,7 @@ class TestAnalyzerResponseSchema:
 
     def test_missing_statistics_raises(self):
         with pytest.raises(ValidationError):
-            AnalyzerResponseSchema(
+            AnalyzerResponseSchema(  # type: ignore[call-arg]
                 metadata=AnalysisMetadataSchema(**_make_metadata()),
                 ecu=ECUIdentitySchema(**_make_ecu_identity()),
                 instructions=[],
@@ -650,7 +650,7 @@ class TestAnalyzerResponseSchema:
 
     def test_missing_instructions_raises(self):
         with pytest.raises(ValidationError):
-            AnalyzerResponseSchema(
+            AnalyzerResponseSchema(  # type: ignore[call-arg]
                 metadata=AnalysisMetadataSchema(**_make_metadata()),
                 ecu=ECUIdentitySchema(**_make_ecu_identity()),
                 statistics=AnalysisStatisticsSchema(**_make_statistics()),
@@ -658,10 +658,10 @@ class TestAnalyzerResponseSchema:
 
     def test_accepts_dict_for_nested_schemas(self):
         obj = AnalyzerResponseSchema(
-            metadata=_make_metadata(),
-            ecu=_make_ecu_identity(),
-            statistics=_make_statistics(),
-            instructions=[_make_instruction()],
+            metadata=_make_metadata(),  # type: ignore[arg-type]
+            ecu=_make_ecu_identity(),  # type: ignore[arg-type]
+            statistics=_make_statistics(),  # type: ignore[arg-type]
+            instructions=[_make_instruction()],  # type: ignore[arg-type]
         )
         assert isinstance(obj.metadata, AnalysisMetadataSchema)
         assert isinstance(obj.ecu, ECUIdentitySchema)
@@ -685,30 +685,30 @@ class TestAnalyzerResponseSchema:
 
 class TestPatcherWarningsSchema:
     def test_default_instantiation_no_args(self):
-        obj = PatcherWarningsSchema()
+        obj = PatcherWarningsSchema()  # type: ignore[call-arg]
         assert obj.size_mismatch is False
         assert obj.size_mismatch_detail is None
         assert obj.match_key_mismatch is False
         assert obj.match_key_mismatch_detail is None
 
     def test_size_mismatch_default_false(self):
-        obj = PatcherWarningsSchema()
+        obj = PatcherWarningsSchema()  # type: ignore[call-arg]
         assert obj.size_mismatch is False
 
     def test_match_key_mismatch_default_false(self):
-        obj = PatcherWarningsSchema()
+        obj = PatcherWarningsSchema()  # type: ignore[call-arg]
         assert obj.match_key_mismatch is False
 
     def test_size_mismatch_detail_default_none(self):
-        obj = PatcherWarningsSchema()
+        obj = PatcherWarningsSchema()  # type: ignore[call-arg]
         assert obj.size_mismatch_detail is None
 
     def test_match_key_mismatch_detail_default_none(self):
-        obj = PatcherWarningsSchema()
+        obj = PatcherWarningsSchema()  # type: ignore[call-arg]
         assert obj.match_key_mismatch_detail is None
 
     def test_with_size_mismatch_true(self):
-        obj = PatcherWarningsSchema(
+        obj = PatcherWarningsSchema(  # type: ignore[call-arg]
             size_mismatch=True,
             size_mismatch_detail="Expected 262144 bytes, got 1048576 bytes.",
         )
@@ -716,12 +716,12 @@ class TestPatcherWarningsSchema:
         assert obj.size_mismatch_detail == "Expected 262144 bytes, got 1048576 bytes."
 
     def test_with_match_key_mismatch_true(self):
-        obj = PatcherWarningsSchema(
+        obj = PatcherWarningsSchema(  # type: ignore[call-arg]
             match_key_mismatch=True,
             match_key_mismatch_detail="Binary key 'EDC16::1037369261' != recipe key 'EDC16::1037370634'.",
         )
         assert obj.match_key_mismatch is True
-        assert "EDC16" in obj.match_key_mismatch_detail
+        assert "EDC16" in obj.match_key_mismatch_detail  # type: ignore[operator]
 
     def test_all_warnings_set(self):
         obj = PatcherWarningsSchema(
@@ -736,7 +736,7 @@ class TestPatcherWarningsSchema:
         assert obj.match_key_mismatch_detail == "Key differs."
 
     def test_detail_can_be_explicitly_none(self):
-        obj = PatcherWarningsSchema(size_mismatch=False, size_mismatch_detail=None)
+        obj = PatcherWarningsSchema(size_mismatch=False, size_mismatch_detail=None)  # type: ignore[call-arg]
         assert obj.size_mismatch_detail is None
 
     def test_field_descriptions_exist(self):
@@ -766,19 +766,19 @@ class TestStrictSummarySchema:
     def test_safe_to_patch_has_no_default(self):
         """safe_to_patch is required — omitting it raises ValidationError."""
         with pytest.raises(ValidationError):
-            StrictSummarySchema(total=10, passed=10, failed=0)
+            StrictSummarySchema(total=10, passed=10, failed=0)  # type: ignore[call-arg]
 
     def test_missing_total_raises(self):
         with pytest.raises(ValidationError):
-            StrictSummarySchema(passed=10, failed=0, safe_to_patch=True)
+            StrictSummarySchema(passed=10, failed=0, safe_to_patch=True)  # type: ignore[call-arg]
 
     def test_missing_passed_raises(self):
         with pytest.raises(ValidationError):
-            StrictSummarySchema(total=10, failed=0, safe_to_patch=True)
+            StrictSummarySchema(total=10, failed=0, safe_to_patch=True)  # type: ignore[call-arg]
 
     def test_missing_failed_raises(self):
         with pytest.raises(ValidationError):
-            StrictSummarySchema(total=10, passed=10, safe_to_patch=True)
+            StrictSummarySchema(total=10, passed=10, safe_to_patch=True)  # type: ignore[call-arg]
 
     def test_zero_total_allowed(self):
         obj = StrictSummarySchema(total=0, passed=0, failed=0, safe_to_patch=True)
@@ -802,7 +802,7 @@ class TestValidateStrictResponseSchema:
         base = {
             "target_file": "target.bin",
             "target_md5": MD5,
-            "warnings": PatcherWarningsSchema(),
+            "warnings": PatcherWarningsSchema(),  # type: ignore[call-arg]
             "summary": StrictSummarySchema(**_make_strict_summary()),
         }
         base.update(overrides)
@@ -817,23 +817,23 @@ class TestValidateStrictResponseSchema:
 
     def test_missing_target_file_raises(self):
         with pytest.raises(ValidationError):
-            ValidateStrictResponseSchema(
+            ValidateStrictResponseSchema(  # type: ignore[call-arg]
                 target_md5=MD5,
-                warnings=PatcherWarningsSchema(),
+                warnings=PatcherWarningsSchema(),  # type: ignore[call-arg]
                 summary=StrictSummarySchema(**_make_strict_summary()),
             )
 
     def test_missing_target_md5_raises(self):
         with pytest.raises(ValidationError):
-            ValidateStrictResponseSchema(
+            ValidateStrictResponseSchema(  # type: ignore[call-arg]
                 target_file="target.bin",
-                warnings=PatcherWarningsSchema(),
+                warnings=PatcherWarningsSchema(),  # type: ignore[call-arg]
                 summary=StrictSummarySchema(**_make_strict_summary()),
             )
 
     def test_missing_warnings_raises(self):
         with pytest.raises(ValidationError):
-            ValidateStrictResponseSchema(
+            ValidateStrictResponseSchema(  # type: ignore[call-arg]
                 target_file="target.bin",
                 target_md5=MD5,
                 summary=StrictSummarySchema(**_make_strict_summary()),
@@ -841,18 +841,18 @@ class TestValidateStrictResponseSchema:
 
     def test_missing_summary_raises(self):
         with pytest.raises(ValidationError):
-            ValidateStrictResponseSchema(
+            ValidateStrictResponseSchema(  # type: ignore[call-arg]
                 target_file="target.bin",
                 target_md5=MD5,
-                warnings=PatcherWarningsSchema(),
+                warnings=PatcherWarningsSchema(),  # type: ignore[call-arg]
             )
 
     def test_accepts_dict_for_warnings_and_summary(self):
         obj = ValidateStrictResponseSchema(
             target_file="target.bin",
             target_md5=MD5,
-            warnings={},
-            summary=_make_strict_summary(),
+            warnings={},  # type: ignore[arg-type]
+            summary=_make_strict_summary(),  # type: ignore[arg-type]
         )
         assert isinstance(obj.warnings, PatcherWarningsSchema)
         assert isinstance(obj.summary, StrictSummarySchema)
@@ -898,31 +898,31 @@ class TestShiftedInstructionSchema:
 
     def test_missing_index_raises(self):
         with pytest.raises(ValidationError):
-            ShiftedInstructionSchema(
+            ShiftedInstructionSchema(  # type: ignore[call-arg]
                 expected_offset="0x1234", found_offset="0x1240", shift=12, match_count=1
             )
 
     def test_missing_expected_offset_raises(self):
         with pytest.raises(ValidationError):
-            ShiftedInstructionSchema(
+            ShiftedInstructionSchema(  # type: ignore[call-arg]
                 index=0, found_offset="0x1240", shift=12, match_count=1
             )
 
     def test_missing_found_offset_raises(self):
         with pytest.raises(ValidationError):
-            ShiftedInstructionSchema(
+            ShiftedInstructionSchema(  # type: ignore[call-arg]
                 index=0, expected_offset="0x1234", shift=12, match_count=1
             )
 
     def test_missing_shift_raises(self):
         with pytest.raises(ValidationError):
-            ShiftedInstructionSchema(
+            ShiftedInstructionSchema(  # type: ignore[call-arg]
                 index=0, expected_offset="0x1234", found_offset="0x1240", match_count=1
             )
 
     def test_missing_match_count_raises(self):
         with pytest.raises(ValidationError):
-            ShiftedInstructionSchema(
+            ShiftedInstructionSchema(  # type: ignore[call-arg]
                 index=0, expected_offset="0x1234", found_offset="0x1240", shift=12
             )
 
@@ -950,15 +950,15 @@ class TestMissingInstructionSchema:
 
     def test_missing_index_raises(self):
         with pytest.raises(ValidationError):
-            MissingInstructionSchema(expected_offset="0xABCD", size=4)
+            MissingInstructionSchema(expected_offset="0xABCD", size=4)  # type: ignore[call-arg]
 
     def test_missing_expected_offset_raises(self):
         with pytest.raises(ValidationError):
-            MissingInstructionSchema(index=0, size=4)
+            MissingInstructionSchema(index=0, size=4)  # type: ignore[call-arg]
 
     def test_missing_size_raises(self):
         with pytest.raises(ValidationError):
-            MissingInstructionSchema(index=0, expected_offset="0xABCD")
+            MissingInstructionSchema(index=0, expected_offset="0xABCD")  # type: ignore[call-arg]
 
     def test_size_one_allowed(self):
         obj = MissingInstructionSchema(index=0, expected_offset="0x0", size=1)
@@ -1034,7 +1034,7 @@ class TestValidateExistsResponseSchema:
         base = {
             "target_file": "target.bin",
             "target_md5": MD5,
-            "warnings": PatcherWarningsSchema(),
+            "warnings": PatcherWarningsSchema(),  # type: ignore[call-arg]
             "summary": ExistenceSummarySchema(**_make_existence_summary()),
         }
         base.update(overrides)
@@ -1076,26 +1076,26 @@ class TestValidateExistsResponseSchema:
 
     def test_missing_target_file_raises(self):
         with pytest.raises(ValidationError):
-            ValidateExistsResponseSchema(
+            ValidateExistsResponseSchema(  # type: ignore[call-arg]
                 target_md5=MD5,
-                warnings=PatcherWarningsSchema(),
+                warnings=PatcherWarningsSchema(),  # type: ignore[call-arg]
                 summary=ExistenceSummarySchema(**_make_existence_summary()),
             )
 
     def test_missing_summary_raises(self):
         with pytest.raises(ValidationError):
-            ValidateExistsResponseSchema(
+            ValidateExistsResponseSchema(  # type: ignore[call-arg]
                 target_file="target.bin",
                 target_md5=MD5,
-                warnings=PatcherWarningsSchema(),
+                warnings=PatcherWarningsSchema(),  # type: ignore[call-arg]
             )
 
     def test_accepts_dict_inputs(self):
         obj = ValidateExistsResponseSchema(
             target_file="f.bin",
             target_md5=MD5,
-            warnings={},
-            summary=_make_existence_summary(),
+            warnings={},  # type: ignore[arg-type]
+            summary=_make_existence_summary(),  # type: ignore[arg-type]
         )
         assert isinstance(obj.warnings, PatcherWarningsSchema)
         assert isinstance(obj.summary, ExistenceSummarySchema)
@@ -1118,19 +1118,19 @@ class TestPatchedFailureSchema:
 
     def test_missing_index_raises(self):
         with pytest.raises(ValidationError):
-            PatchedFailureSchema(offset="0x5678", size=2, reason="mb not found")
+            PatchedFailureSchema(offset="0x5678", size=2, reason="mb not found")  # type: ignore[call-arg]
 
     def test_missing_offset_raises(self):
         with pytest.raises(ValidationError):
-            PatchedFailureSchema(index=0, size=2, reason="mb not found")
+            PatchedFailureSchema(index=0, size=2, reason="mb not found")  # type: ignore[call-arg]
 
     def test_missing_size_raises(self):
         with pytest.raises(ValidationError):
-            PatchedFailureSchema(index=0, offset="0x5678", reason="mb not found")
+            PatchedFailureSchema(index=0, offset="0x5678", reason="mb not found")  # type: ignore[call-arg]
 
     def test_missing_reason_raises(self):
         with pytest.raises(ValidationError):
-            PatchedFailureSchema(index=0, offset="0x5678", size=2)
+            PatchedFailureSchema(index=0, offset="0x5678", size=2)  # type: ignore[call-arg]
 
     def test_all_fields_correct_type(self):
         obj = PatchedFailureSchema(index=0, offset="0xABCD", size=4, reason="test")
@@ -1165,19 +1165,19 @@ class TestPatchedSummarySchema:
 
     def test_patch_confirmed_required(self):
         with pytest.raises(ValidationError):
-            PatchedSummarySchema(total=10, confirmed=10, failed=0)
+            PatchedSummarySchema(total=10, confirmed=10, failed=0)  # type: ignore[call-arg]
 
     def test_missing_total_raises(self):
         with pytest.raises(ValidationError):
-            PatchedSummarySchema(confirmed=10, failed=0, patch_confirmed=True)
+            PatchedSummarySchema(confirmed=10, failed=0, patch_confirmed=True)  # type: ignore[call-arg]
 
     def test_missing_confirmed_raises(self):
         with pytest.raises(ValidationError):
-            PatchedSummarySchema(total=10, failed=0, patch_confirmed=True)
+            PatchedSummarySchema(total=10, failed=0, patch_confirmed=True)  # type: ignore[call-arg]
 
     def test_missing_failed_raises(self):
         with pytest.raises(ValidationError):
-            PatchedSummarySchema(total=10, confirmed=10, patch_confirmed=True)
+            PatchedSummarySchema(total=10, confirmed=10, patch_confirmed=True)  # type: ignore[call-arg]
 
     def test_all_fields_correct_type(self):
         obj = PatchedSummarySchema(**_make_patched_summary())
@@ -1197,7 +1197,7 @@ class TestValidatePatchedResponseSchema:
         base = {
             "patched_file": "patched.bin",
             "patched_md5": MD5,
-            "warnings": PatcherWarningsSchema(),
+            "warnings": PatcherWarningsSchema(),  # type: ignore[call-arg]
             "summary": PatchedSummarySchema(**_make_patched_summary()),
         }
         base.update(overrides)
@@ -1223,23 +1223,23 @@ class TestValidatePatchedResponseSchema:
 
     def test_missing_patched_file_raises(self):
         with pytest.raises(ValidationError):
-            ValidatePatchedResponseSchema(
+            ValidatePatchedResponseSchema(  # type: ignore[call-arg]
                 patched_md5=MD5,
-                warnings=PatcherWarningsSchema(),
+                warnings=PatcherWarningsSchema(),  # type: ignore[call-arg]
                 summary=PatchedSummarySchema(**_make_patched_summary()),
             )
 
     def test_missing_patched_md5_raises(self):
         with pytest.raises(ValidationError):
-            ValidatePatchedResponseSchema(
+            ValidatePatchedResponseSchema(  # type: ignore[call-arg]
                 patched_file="patched.bin",
-                warnings=PatcherWarningsSchema(),
+                warnings=PatcherWarningsSchema(),  # type: ignore[call-arg]
                 summary=PatchedSummarySchema(**_make_patched_summary()),
             )
 
     def test_missing_warnings_raises(self):
         with pytest.raises(ValidationError):
-            ValidatePatchedResponseSchema(
+            ValidatePatchedResponseSchema(  # type: ignore[call-arg]
                 patched_file="patched.bin",
                 patched_md5=MD5,
                 summary=PatchedSummarySchema(**_make_patched_summary()),
@@ -1247,18 +1247,18 @@ class TestValidatePatchedResponseSchema:
 
     def test_missing_summary_raises(self):
         with pytest.raises(ValidationError):
-            ValidatePatchedResponseSchema(
+            ValidatePatchedResponseSchema(  # type: ignore[call-arg]
                 patched_file="patched.bin",
                 patched_md5=MD5,
-                warnings=PatcherWarningsSchema(),
+                warnings=PatcherWarningsSchema(),  # type: ignore[call-arg]
             )
 
     def test_accepts_dict_inputs(self):
         obj = ValidatePatchedResponseSchema(
             patched_file="p.bin",
             patched_md5=MD5,
-            warnings={},
-            summary=_make_patched_summary(),
+            warnings={},  # type: ignore[arg-type]
+            summary=_make_patched_summary(),  # type: ignore[arg-type]
         )
         assert isinstance(obj.warnings, PatcherWarningsSchema)
         assert isinstance(obj.summary, PatchedSummarySchema)
@@ -1284,15 +1284,15 @@ class TestPatchFailedInstructionSchema:
 
     def test_missing_index_raises(self):
         with pytest.raises(ValidationError):
-            PatchFailedInstructionSchema(offset="0xDEAD", message="failed")
+            PatchFailedInstructionSchema(offset="0xDEAD", message="failed")  # type: ignore[call-arg]
 
     def test_missing_offset_raises(self):
         with pytest.raises(ValidationError):
-            PatchFailedInstructionSchema(index=0, message="failed")
+            PatchFailedInstructionSchema(index=0, message="failed")  # type: ignore[call-arg]
 
     def test_missing_message_raises(self):
         with pytest.raises(ValidationError):
-            PatchFailedInstructionSchema(index=0, offset="0xDEAD")
+            PatchFailedInstructionSchema(index=0, offset="0xDEAD")  # type: ignore[call-arg]
 
     def test_all_fields_correct_type(self):
         obj = PatchFailedInstructionSchema(index=5, offset="0x0", message="err")
@@ -1321,7 +1321,7 @@ class TestPatchSummarySchema:
         assert obj.patched_md5 == MD5
 
     def test_patched_md5_default_none(self):
-        obj = PatchSummarySchema(
+        obj = PatchSummarySchema(  # type: ignore[call-arg]
             total=10, applied=0, failed=10, shifted=0, patch_applied=False
         )
         assert obj.patched_md5 is None
@@ -1339,23 +1339,23 @@ class TestPatchSummarySchema:
 
     def test_patch_applied_required(self):
         with pytest.raises(ValidationError):
-            PatchSummarySchema(total=10, applied=10, failed=0, shifted=0)
+            PatchSummarySchema(total=10, applied=10, failed=0, shifted=0)  # type: ignore[call-arg]
 
     def test_missing_total_raises(self):
         with pytest.raises(ValidationError):
-            PatchSummarySchema(applied=10, failed=0, shifted=0, patch_applied=True)
+            PatchSummarySchema(applied=10, failed=0, shifted=0, patch_applied=True)  # type: ignore[call-arg]
 
     def test_missing_applied_raises(self):
         with pytest.raises(ValidationError):
-            PatchSummarySchema(total=10, failed=0, shifted=0, patch_applied=True)
+            PatchSummarySchema(total=10, failed=0, shifted=0, patch_applied=True)  # type: ignore[call-arg]
 
     def test_missing_failed_raises(self):
         with pytest.raises(ValidationError):
-            PatchSummarySchema(total=10, applied=10, shifted=0, patch_applied=True)
+            PatchSummarySchema(total=10, applied=10, shifted=0, patch_applied=True)  # type: ignore[call-arg]
 
     def test_missing_shifted_raises(self):
         with pytest.raises(ValidationError):
-            PatchSummarySchema(total=10, applied=10, failed=0, patch_applied=True)
+            PatchSummarySchema(total=10, applied=10, failed=0, patch_applied=True)  # type: ignore[call-arg]
 
     def test_shifted_with_some_applied_at_wrong_offset(self):
         obj = PatchSummarySchema(
@@ -1391,7 +1391,7 @@ class TestPatchApplyResponseSchema:
         base = {
             "target_file": "target.bin",
             "target_md5": MD5,
-            "warnings": PatcherWarningsSchema(),
+            "warnings": PatcherWarningsSchema(),  # type: ignore[call-arg]
             "summary": PatchSummarySchema(**_make_patch_summary()),
         }
         base.update(overrides)
@@ -1419,23 +1419,23 @@ class TestPatchApplyResponseSchema:
 
     def test_missing_target_file_raises(self):
         with pytest.raises(ValidationError):
-            PatchApplyResponseSchema(
+            PatchApplyResponseSchema(  # type: ignore[call-arg]
                 target_md5=MD5,
-                warnings=PatcherWarningsSchema(),
+                warnings=PatcherWarningsSchema(),  # type: ignore[call-arg]
                 summary=PatchSummarySchema(**_make_patch_summary()),
             )
 
     def test_missing_target_md5_raises(self):
         with pytest.raises(ValidationError):
-            PatchApplyResponseSchema(
+            PatchApplyResponseSchema(  # type: ignore[call-arg]
                 target_file="target.bin",
-                warnings=PatcherWarningsSchema(),
+                warnings=PatcherWarningsSchema(),  # type: ignore[call-arg]
                 summary=PatchSummarySchema(**_make_patch_summary()),
             )
 
     def test_missing_warnings_raises(self):
         with pytest.raises(ValidationError):
-            PatchApplyResponseSchema(
+            PatchApplyResponseSchema(  # type: ignore[call-arg]
                 target_file="target.bin",
                 target_md5=MD5,
                 summary=PatchSummarySchema(**_make_patch_summary()),
@@ -1443,18 +1443,18 @@ class TestPatchApplyResponseSchema:
 
     def test_missing_summary_raises(self):
         with pytest.raises(ValidationError):
-            PatchApplyResponseSchema(
+            PatchApplyResponseSchema(  # type: ignore[call-arg]
                 target_file="target.bin",
                 target_md5=MD5,
-                warnings=PatcherWarningsSchema(),
+                warnings=PatcherWarningsSchema(),  # type: ignore[call-arg]
             )
 
     def test_accepts_dict_for_warnings(self):
         obj = PatchApplyResponseSchema(
             target_file="t.bin",
             target_md5=MD5,
-            warnings={},
-            summary=_make_patch_summary(),
+            warnings={},  # type: ignore[arg-type]
+            summary=_make_patch_summary(),  # type: ignore[arg-type]
         )
         assert isinstance(obj.warnings, PatcherWarningsSchema)
 
@@ -1462,8 +1462,8 @@ class TestPatchApplyResponseSchema:
         obj = PatchApplyResponseSchema(
             target_file="t.bin",
             target_md5=MD5,
-            warnings=PatcherWarningsSchema(),
-            summary=_make_patch_summary(),
+            warnings=PatcherWarningsSchema(),  # type: ignore[call-arg]
+            summary=_make_patch_summary(),  # type: ignore[arg-type]
         )
         assert isinstance(obj.summary, PatchSummarySchema)
 
@@ -1481,7 +1481,7 @@ class TestPatchApplyResponseSchema:
         assert obj.warnings.match_key_mismatch is False
 
     def test_with_size_mismatch_warning(self):
-        warnings = PatcherWarningsSchema(
+        warnings = PatcherWarningsSchema(  # type: ignore[call-arg]
             size_mismatch=True, size_mismatch_detail="Size mismatch detected."
         )
         obj = self._make(warnings=warnings)

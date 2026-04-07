@@ -18,7 +18,7 @@ Covers:
 
 import hashlib
 
-from openremap.tuning.services.identifier import identify_ecu
+from openremap.core.services.identifier import identify_ecu
 
 
 # ---------------------------------------------------------------------------

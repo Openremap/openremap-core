@@ -58,8 +58,8 @@ import re
 
 import pytest
 
-from openremap.tuning.manufacturers.bosch.m4x.extractor import BoschM4xExtractor
-from openremap.tuning.manufacturers.bosch.m4x.patterns import EXCLUSION_SIGNATURES
+from openremap.core.manufacturers.bosch.m4x.extractor import BoschM4xExtractor
+from openremap.core.manufacturers.bosch.m4x.patterns import EXCLUSION_SIGNATURES
 
 EXTRACTOR = BoschM4xExtractor()
 

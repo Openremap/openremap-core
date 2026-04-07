@@ -37,7 +37,7 @@ First, check whether Python is already installed:
 python --version
 ```
 
-- If you see `Python 3.14` or higher — you are good. Skip to Step 3.
+- If you see `Python 3.10` or higher — you are good. Skip to Step 3.
 - If you see an older version, or `python: command not found` — install Python now.
 
 ### Option A — via winget (recommended, Windows 10 and later)

@@ -19,7 +19,7 @@ Covers:
 import pytest
 
 from tests.conftest import make_bin, make_bin_with, make_recipe, make_instruction
-from openremap.tuning.services.patcher import ECUPatcher, PatchStatus
+from openremap.core.services.patcher import ECUPatcher, PatchStatus
 
 
 # ---------------------------------------------------------------------------
@@ -433,7 +433,7 @@ class TestShiftedInstruction:
         The ctx+ob pattern is more than ±2048 bytes from the expected offset.
         The patcher must NOT find it and must raise ValueError.
         """
-        from openremap.tuning.services.patcher import EXACT_WINDOW
+        from openremap.core.services.patcher import EXACT_WINDOW
 
         orig = bytearray(EXACT_WINDOW * 3)
         # Place the real pattern at expected_offset + EXACT_WINDOW + 100

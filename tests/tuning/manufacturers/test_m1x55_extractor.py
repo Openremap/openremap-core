@@ -53,7 +53,7 @@ import hashlib
 
 import pytest
 
-from openremap.tuning.manufacturers.bosch.m1x55.extractor import (
+from openremap.core.manufacturers.bosch.m1x55.extractor import (
     DESCRIPTOR_PATTERN,
     DESCRIPTOR_REGION,
     DETECTION_SIGNATURE,

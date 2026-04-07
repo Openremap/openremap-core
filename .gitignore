@@ -1,0 +1,43 @@
+# ── Python generated ──────────────────────────────────────────────────────────
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info/
+
+# ── Virtual environment ───────────────────────────────────────────────────────
+.venv/
+
+# ── uv ────────────────────────────────────────────────────────────────────────
+# uv.lock is intentionally committed — do not ignore it
+
+# ── Testing & coverage ────────────────────────────────────────────────────────
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+
+# ── Environment variables — never commit secrets ──────────────────────────────
+.env
+.env.*
+plugins/
+
+# ── Logs ─────────────────────────────────────────────────────────────────────
+logs/
+*.log
+
+# ── ECU binary files — never commit real ECU binaries ────────────────────────
+*.bin
+*.ori
+*.BIN
+*.ORI
+
+# ── Editor & OS ───────────────────────────────────────────────────────────────
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db

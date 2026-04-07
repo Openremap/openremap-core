@@ -41,8 +41,8 @@ Covers:
 
 import hashlib
 
-from openremap.tuning.manufacturers.bosch.edc15.extractor import BoschEDC15Extractor
-from openremap.tuning.manufacturers.bosch.edc15.patterns import (
+from openremap.core.manufacturers.bosch.edc15.extractor import BoschEDC15Extractor
+from openremap.core.manufacturers.bosch.edc15.patterns import (
     DETECTION_SIGNATURES,
     EDC15_FORMAT_E_IDENT_RE,
     EDC15_PP22_HEADER,

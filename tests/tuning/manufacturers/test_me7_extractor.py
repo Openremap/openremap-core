@@ -34,8 +34,8 @@ Covers:
 
 import hashlib
 
-from openremap.tuning.manufacturers.bosch.me7.extractor import BoschME7Extractor
-from openremap.tuning.manufacturers.bosch.me7.patterns import (
+from openremap.core.manufacturers.bosch.me7.extractor import BoschME7Extractor
+from openremap.core.manufacturers.bosch.me7.patterns import (
     DETECTION_SIGNATURES,
     EXCLUSION_SIGNATURES,
     ME7_ZZ_OFFSET,
@@ -1630,7 +1630,7 @@ class TestCoverageMe7ExcEdges:
         .decode('ascii') — no errors= parameter, so non-ASCII bytes raise
         UnicodeDecodeError, which is caught and sets software_version=None.
         """
-        from openremap.tuning.manufacturers.bosch.me7.extractor import (
+        from openremap.core.manufacturers.bosch.me7.extractor import (
             BoschME7Extractor,
         )
 
@@ -1668,7 +1668,7 @@ class TestCoverageMe7ExcEdges:
         False when the ZZ\\x01\\x02 marker is present but b'ERCOS' is absent
         at offset 0x200.
         """
-        from openremap.tuning.manufacturers.bosch.me7.extractor import (
+        from openremap.core.manufacturers.bosch.me7.extractor import (
             BoschME7Extractor,
         )
 
@@ -1690,7 +1690,7 @@ class TestCoverageMe7ExcEdges:
 
     def test_is_early_me7_false_when_ercos_wrong_content(self):
         """Line 475: fires with wrong bytes at ERCOS offset (not b'ERCOS')."""
-        from openremap.tuning.manufacturers.bosch.me7.extractor import (
+        from openremap.core.manufacturers.bosch.me7.extractor import (
             BoschME7Extractor,
         )
 
@@ -1717,7 +1717,7 @@ class TestCoverageMe7ExcEdges:
         """
         from unittest.mock import MagicMock, patch
 
-        from openremap.tuning.manufacturers.bosch.me7.extractor import (
+        from openremap.core.manufacturers.bosch.me7.extractor import (
             BoschME7Extractor,
         )
 
@@ -1740,7 +1740,7 @@ class TestCoverageMe7ExcEdges:
         }
 
         with patch(
-            "openremap.tuning.manufacturers.bosch.me7.extractor.re.match",
+            "openremap.core.manufacturers.bosch.me7.extractor.re.match",
             side_effect=fake_match,
         ):
             result = extractor._resolve_oem_part_number(raw_hits)

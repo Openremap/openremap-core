@@ -27,7 +27,7 @@ Covers:
 
 import hashlib
 
-from openremap.tuning.manufacturers.bosch.m2x.extractor import BoschM2xExtractor
+from openremap.core.manufacturers.bosch.m2x.extractor import BoschM2xExtractor
 
 EXTRACTOR = BoschM2xExtractor()
 

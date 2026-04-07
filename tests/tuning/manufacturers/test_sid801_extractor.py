@@ -44,10 +44,10 @@ Covers:
 import hashlib
 import re
 
-from openremap.tuning.manufacturers.siemens.sid801.extractor import (
+from openremap.core.manufacturers.siemens.sid801.extractor import (
     SiemensSID801Extractor,
 )
-from openremap.tuning.manufacturers.siemens.sid801.patterns import (
+from openremap.core.manufacturers.siemens.sid801.patterns import (
     DETECTION_SIGNATURES,
     EXCLUSION_SIGNATURES,
     PATTERNS,
@@ -1134,19 +1134,19 @@ class TestResolverCalibrationId:
 
 class TestRegistryIntegration:
     def test_sid801_in_siemens_extractors(self):
-        from openremap.tuning.manufacturers.siemens import EXTRACTORS
+        from openremap.core.manufacturers.siemens import EXTRACTORS
 
         names = [type(e).__name__ for e in EXTRACTORS]
         assert "SiemensSID801Extractor" in names
 
     def test_sid801_in_global_extractors(self):
-        from openremap.tuning.manufacturers import EXTRACTORS
+        from openremap.core.manufacturers import EXTRACTORS
 
         names = [type(e).__name__ for e in EXTRACTORS]
         assert "SiemensSID801Extractor" in names
 
     def test_sid801_before_sid803_in_registry(self):
-        from openremap.tuning.manufacturers.siemens import EXTRACTORS
+        from openremap.core.manufacturers.siemens import EXTRACTORS
 
         names = [type(e).__name__ for e in EXTRACTORS]
         idx801 = names.index("SiemensSID801Extractor")
@@ -1154,7 +1154,7 @@ class TestRegistryIntegration:
         assert idx801 < idx803, "SID801 must come before SID803 in the registry"
 
     def test_no_duplicate_extractors(self):
-        from openremap.tuning.manufacturers.siemens import EXTRACTORS
+        from openremap.core.manufacturers.siemens import EXTRACTORS
 
         names = [type(e).__name__ for e in EXTRACTORS]
         assert len(names) == len(set(names)), "Duplicate extractors in registry"

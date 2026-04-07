@@ -12,7 +12,7 @@ Covers:
 """
 
 from tests.conftest import make_bin, make_bin_with, make_recipe, make_instruction
-from openremap.tuning.services.validate_patched import ECUPatchedValidator
+from openremap.core.services.validate_patched import ECUPatchedValidator
 
 
 # ---------------------------------------------------------------------------
@@ -636,7 +636,7 @@ class TestCheckMatchKeyMismatch:
 
         v = make_validator(make_bin(256), [], ecu={"match_key": "EDC17::SOMEVERSION"})
         with patch(
-            "openremap.tuning.services.validate_patched.identify_ecu"
+            "openremap.core.services.validate_patched.identify_ecu"
         ) as mock_id:
             mock_id.side_effect = RuntimeError("identification failed")
             result = v.check_match_key()
@@ -648,7 +648,7 @@ class TestCheckMatchKeyMismatch:
         recipe_key = "EDC17::SOMEVERSION"
         v = make_validator(make_bin(256), [], ecu={"match_key": recipe_key})
         with patch(
-            "openremap.tuning.services.validate_patched.identify_ecu"
+            "openremap.core.services.validate_patched.identify_ecu"
         ) as mock_id:
             mock_id.return_value = {"match_key": recipe_key}
             result = v.check_match_key()
@@ -659,7 +659,7 @@ class TestCheckMatchKeyMismatch:
 
         v = make_validator(make_bin(256), [], ecu={"match_key": "EDC17::SOMEVERSION"})
         with patch(
-            "openremap.tuning.services.validate_patched.identify_ecu"
+            "openremap.core.services.validate_patched.identify_ecu"
         ) as mock_id:
             mock_id.return_value = {"match_key": "EDC17::DIFFERENTVERSION"}
             result = v.check_match_key()

@@ -457,7 +457,7 @@ class TestFormatConfidenceInlineDirect:
     def test_returns_string_for_high_tier(self) -> None:
         """_format_confidence_inline returns a non-empty styled string."""
         from openremap.cli.commands.identify import _format_confidence_inline
-        from openremap.tuning.services.confidence import (
+        from openremap.core.services.confidence import (
             ConfidenceResult,
             ConfidenceSignal,
         )
@@ -475,7 +475,7 @@ class TestFormatConfidenceInlineDirect:
     def test_returns_string_for_unknown_tier(self) -> None:
         """_format_confidence_inline handles Unknown tier without error."""
         from openremap.cli.commands.identify import _format_confidence_inline
-        from openremap.tuning.services.confidence import ConfidenceResult
+        from openremap.core.services.confidence import ConfidenceResult
 
         cr = ConfidenceResult(score=0, tier="Unknown", signals=[], warnings=[])
         result = _format_confidence_inline(cr)
@@ -484,7 +484,7 @@ class TestFormatConfidenceInlineDirect:
     def test_returns_string_for_suspicious_tier_with_summary(self) -> None:
         """_format_confidence_inline includes summary when signals are present."""
         from openremap.cli.commands.identify import _format_confidence_inline
-        from openremap.tuning.services.confidence import (
+        from openremap.core.services.confidence import (
             ConfidenceResult,
             ConfidenceSignal,
         )
@@ -505,7 +505,7 @@ class TestIdentifyWithConfidenceWarnings:
     def test_warnings_appear_in_table_output(self, tmp_path: Path) -> None:
         """When score_identity returns warnings, they appear in the table output."""
         from unittest.mock import patch
-        from openremap.tuning.services.confidence import (
+        from openremap.core.services.confidence import (
             ConfidenceResult,
             ConfidenceSignal,
         )
@@ -533,7 +533,7 @@ class TestIdentifyWithConfidenceWarnings:
     def test_multiple_warnings_all_displayed(self, tmp_path: Path) -> None:
         """Multiple warnings are each displayed in the output."""
         from unittest.mock import patch
-        from openremap.tuning.services.confidence import (
+        from openremap.core.services.confidence import (
             ConfidenceResult,
             ConfidenceSignal,
         )
@@ -632,7 +632,7 @@ class TestIdentifySignalsLoop:
     def test_negative_delta_signal_displayed(self, tmp_path: Path) -> None:
         """A signal with negative delta renders with a minus marker."""
         from unittest.mock import patch
-        from openremap.tuning.services.confidence import (
+        from openremap.core.services.confidence import (
             ConfidenceResult,
             ConfidenceSignal,
         )
@@ -664,7 +664,7 @@ class TestIdentifySignalsLoop:
     def test_identified_ecu_shows_manufacturer_and_family(self, tmp_path: Path) -> None:
         """When ecu_family is not None the status line shows manufacturer · family."""
         from unittest.mock import patch
-        from openremap.tuning.services.confidence import (
+        from openremap.core.services.confidence import (
             ConfidenceResult,
             ConfidenceSignal,
         )

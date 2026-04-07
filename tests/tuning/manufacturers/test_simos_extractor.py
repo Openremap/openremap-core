@@ -38,10 +38,10 @@ Covers:
 
 import hashlib
 
-from openremap.tuning.manufacturers.siemens.simos.extractor import (
+from openremap.core.manufacturers.siemens.simos.extractor import (
     SiemensSimosExtractor,
 )
-from openremap.tuning.manufacturers.siemens.simos.patterns import (
+from openremap.core.manufacturers.siemens.simos.patterns import (
     DETECTION_SIGNATURES,
     EXCLUSION_SIGNATURES,
     PATTERNS,

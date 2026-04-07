@@ -12,7 +12,7 @@ Covers:
 """
 
 from tests.conftest import make_bin, make_bin_with
-from openremap.tuning.services.recipe_builder import ECUDiffAnalyzer, Change
+from openremap.core.services.recipe_builder import ECUDiffAnalyzer, Change
 
 
 # ---------------------------------------------------------------------------

@@ -53,7 +53,7 @@ import hashlib
 
 import pytest
 
-from openremap.tuning.manufacturers.bosch.m3x.extractor import BoschM3xExtractor
+from openremap.core.manufacturers.bosch.m3x.extractor import BoschM3xExtractor
 
 EXTRACTOR = BoschM3xExtractor()
 

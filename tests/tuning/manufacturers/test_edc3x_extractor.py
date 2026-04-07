@@ -35,7 +35,7 @@ import hashlib
 
 import pytest
 
-from openremap.tuning.manufacturers.bosch.edc3x.extractor import (
+from openremap.core.manufacturers.bosch.edc3x.extractor import (
     ALT_VV33_MAGIC,
     BMW_128_ANCHOR_HI,
     BMW_128_ANCHOR_LO,
@@ -1648,7 +1648,7 @@ class TestCoverageEdc3xParserEdges:
         mock_match.group.side_effect = _side
 
         with patch(
-            "openremap.tuning.manufacturers.bosch.edc3x.extractor.re.search",
+            "openremap.core.manufacturers.bosch.edc3x.extractor.re.search",
             return_value=mock_match,
         ):
             oem, hw, ds, ev = EXTRACTOR._parse_ident_vag(b"dummy data" * 100)
@@ -1712,7 +1712,7 @@ class TestCoverageEdc3xParserEdges:
         mock_pattern.search.return_value = mock_match
 
         with patch(
-            "openremap.tuning.manufacturers.bosch.edc3x.extractor.IDENT_PATTERN_OPEL_256",
+            "openremap.core.manufacturers.bosch.edc3x.extractor.IDENT_PATTERN_OPEL_256",
             new=mock_pattern,
         ):
             data = bytearray(0x40000)  # 256 KB so window at 0x10000 exists
@@ -1732,7 +1732,7 @@ class TestCoverageEdc3xParserEdges:
         mock_pattern.search.return_value = mock_match
 
         with patch(
-            "openremap.tuning.manufacturers.bosch.edc3x.extractor.IDENT_PATTERN_OPEL_256",
+            "openremap.core.manufacturers.bosch.edc3x.extractor.IDENT_PATTERN_OPEL_256",
             new=mock_pattern,
         ):
             data = bytearray(0x40000)
@@ -1759,7 +1759,7 @@ class TestCoverageEdc3xParserEdges:
         mock_pattern.search.return_value = mock_match
 
         with patch(
-            "openremap.tuning.manufacturers.bosch.edc3x.extractor.IDENT_PATTERN_OPEL",
+            "openremap.core.manufacturers.bosch.edc3x.extractor.IDENT_PATTERN_OPEL",
             new=mock_pattern,
         ):
             result = EXTRACTOR._parse_ident_opel(b"\xff" * 0x20000)
@@ -1780,7 +1780,7 @@ class TestCoverageEdc3xParserEdges:
         mock_pattern.search.return_value = mock_match
 
         with patch(
-            "openremap.tuning.manufacturers.bosch.edc3x.extractor.IDENT_PATTERN_OPEL",
+            "openremap.core.manufacturers.bosch.edc3x.extractor.IDENT_PATTERN_OPEL",
             new=mock_pattern,
         ):
             result = EXTRACTOR._parse_ident_opel(b"\xff" * 0x20000)

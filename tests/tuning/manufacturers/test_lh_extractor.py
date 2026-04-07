@@ -32,7 +32,7 @@ Covers:
 
 import hashlib
 
-from openremap.tuning.manufacturers.bosch.lh.extractor import BoschLHExtractor
+from openremap.core.manufacturers.bosch.lh.extractor import BoschLHExtractor
 
 EXTRACTOR = BoschLHExtractor()
 

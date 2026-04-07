@@ -44,7 +44,7 @@ import hashlib
 
 import pytest
 
-from openremap.tuning.manufacturers.bosch.me9.extractor import (
+from openremap.core.manufacturers.bosch.me9.extractor import (
     BoschME9Extractor,
     _ME9_ANCHOR,
     _MED9_MARKER,
@@ -800,7 +800,7 @@ class TestCoverageMe9FindGroup1:
         mock_match.group.side_effect = IndexError("no such group")
 
         with patch(
-            "openremap.tuning.manufacturers.bosch.me9.extractor.re.search",
+            "openremap.core.manufacturers.bosch.me9.extractor.re.search",
             return_value=mock_match,
         ):
             result = EXTRACTOR._find_group1(
@@ -821,7 +821,7 @@ class TestCoverageMe9FindGroup1:
         mock_match.group.side_effect = AttributeError("no group method")
 
         with patch(
-            "openremap.tuning.manufacturers.bosch.me9.extractor.re.search",
+            "openremap.core.manufacturers.bosch.me9.extractor.re.search",
             return_value=mock_match,
         ):
             result = EXTRACTOR._find_group1(

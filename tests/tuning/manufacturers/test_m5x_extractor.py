@@ -63,8 +63,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from openremap.tuning.manufacturers.bosch.m5x.extractor import BoschM5xExtractor
-from openremap.tuning.manufacturers.bosch.m5x.patterns import EXCLUSION_SIGNATURES
+from openremap.core.manufacturers.bosch.m5x.extractor import BoschM5xExtractor
+from openremap.core.manufacturers.bosch.m5x.patterns import EXCLUSION_SIGNATURES
 
 EXTRACTOR = BoschM5xExtractor()
 
@@ -1120,7 +1120,7 @@ class TestResolveOemPartNumber:
         mock_m = MagicMock()
         mock_m.group.return_value = b"8D0907"  # 6 chars, has alpha, < 8
 
-        target = "openremap.tuning.manufacturers.bosch.m5x.extractor.re.search"
+        target = "openremap.core.manufacturers.bosch.m5x.extractor.re.search"
         with patch(target, return_value=mock_m):
             result = EXTRACTOR._resolve_oem_part_number(b"\x00" * 0x40000)
 

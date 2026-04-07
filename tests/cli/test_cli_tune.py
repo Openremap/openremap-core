@@ -39,7 +39,7 @@ import pytest
 from typer.testing import CliRunner
 
 from openremap.cli.main import app
-from openremap.tuning.services.recipe_builder import ECUDiffAnalyzer
+from openremap.core.services.recipe_builder import ECUDiffAnalyzer
 
 runner = CliRunner()
 

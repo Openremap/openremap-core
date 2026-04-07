@@ -1,15 +1,17 @@
 # OpenRemap
 
-[![CI](https://github.com/Pinelo92/openremap/actions/workflows/ci.yml/badge.svg)](https://github.com/Pinelo92/openremap/actions/workflows/ci.yml)
-[![Coverage](https://codecov.io/gh/Pinelo92/openremap/branch/main/graph/badge.svg)](https://codecov.io/gh/Pinelo92/openremap)
+[![CI](https://github.com/Openremap/openremap-core/actions/workflows/ci.yml/badge.svg)](https://github.com/Openremap/openremap-core/actions/workflows/ci.yml)
+[![Coverage](https://codecov.io/gh/Openremap/openremap-core/branch/main/graph/badge.svg)](https://codecov.io/gh/Openremap/openremap-core)
 [![PyPI](https://img.shields.io/pypi/v/openremap.svg)](https://pypi.org/project/openremap/)
 [![Changelog](https://img.shields.io/badge/-Changelog-blue.svg)](CHANGELOG.md)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Python 3.14+](https://img.shields.io/badge/python-3.14+-blue.svg)](https://www.python.org/downloads/)
+[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![uv](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/uv/main/assets/badge/v0.json)](https://github.com/astral-sh/uv)
 
-**Open-source ECU binary identification, diffing, and patching toolkit.**
-Free alternative to the identification and binary-diff workflows locked inside WinOLS, ECM Titanium, and similar commercial tools.
+**Python library and CLI for ECU binary identification, diffing, and patching.**
+Embed it in your application, automate it in a pipeline, or run it from the terminal.
+
+🌐 **[openremap.com](https://www.openremap.com)** — full documentation, guides, and changelog.
 
 > Runs on your machine. No internet. No account. No data leaves your hands — ever.
 
@@ -21,15 +23,37 @@ Free alternative to the identification and binary-diff workflows locked inside W
 
 ---
 
+## What it is
+
+OpenRemap is a **Python library first, CLI second**. The same pipeline that powers the command-line tool is fully available as importable services — no subprocess, no parsing stdout.
+
+```python
+from openremap.core.services.identifier import identify_ecu
+from openremap.core.services.confidence import score_identity
+from openremap.core.services.patcher    import ECUPatcher
+
+data     = open("ecu.bin", "rb").read()
+identity = identify_ecu(data, filename="ecu.bin")
+result   = score_identity(identity)
+
+print(f"{identity['ecu_family']}  {result.tier}")  # EDC17  High
+```
+
+All services accept `bytes` and `dict` — no file paths, no hidden state, trivial to test and wrap in an API endpoint or a desktop app.
+
+→ [Full integration guide](docs/integration.md)
+
+---
+
 ## The problem
 
-ECU tuners work with raw binary files — `.bin` dumps read from engine control units. Every day they need to:
+ECU work revolves around three tasks that today require expensive commercial software (€2,500–€8,000+) or manual hex-editor work with no audit trail:
 
-1. **Figure out what a binary is** — which manufacturer, which ECU family, which software revision
-2. **Compare two binaries** — what exactly changed between a stock file and a tuned file
-3. **Apply those changes to another file** — take a known-good tune and patch it onto a different binary of the same ECU
+1. **Identify a binary** — manufacturer, ECU family, software revision, confidence score
+2. **Diff two binaries** — what changed between a stock file and a tuned file, captured as a portable recipe
+3. **Apply a recipe to another binary** — validate, patch, and verify — all-or-nothing
 
-Today, these tasks require expensive commercial software (€2,500–€8,000+), or manual hex-editor work with no audit trail and no safety net.
+Whether you are building a tuning application, automating a workflow, or just need a reliable offline tool — OpenRemap gives you a clean Python API and a full CLI for all three.
 
 ## What OpenRemap does
 
@@ -132,6 +156,8 @@ openremap commands    # Quick reference for all available commands
 
 ## Documentation
 
+- 🌐 [openremap.com](https://www.openremap.com) — website with full guides and changelog
+- [Integration guide — using OpenRemap as a Python library](docs/integration.md)
 - [How it all works](docs/about.md)
 - [CLI commands overview](docs/cli.md)
 - [Confidence scoring — tiers, signals, and breakdown](docs/confidence.md)

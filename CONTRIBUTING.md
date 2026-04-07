@@ -71,7 +71,7 @@ Any output produced by this tool — recipes, patched binaries, or identificatio
 
 ### Prerequisites
 
-- Python 3.14+
+- Python 3.10+
 - [uv](https://github.com/astral-sh/uv)
 
 ### Steps
@@ -257,7 +257,7 @@ uv run pytest
 
 ## Code Style
 
-- **Python 3.14+ type hints everywhere.** Use `str | None` rather than `Optional[str]` for new code.
+- **Python 3.10+ type hints everywhere.** Use `str | None` rather than `Optional[str]` for new code.
 - **Docstrings on all public methods.** Follow the style already present in `base.py` and the validator services — short summary line, then `Args:` / `Returns:` blocks where the function is non-trivial.
 - **No bare `except`.** Catch specific exceptions or use `except Exception` with a comment explaining why.
 - **No abbreviations in variable names** unless they are universally understood in the domain (`ob`, `mb`, `ctx`, `ecu`, `sw`).

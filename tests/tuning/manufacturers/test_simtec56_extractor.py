@@ -35,10 +35,10 @@ Covers:
 
 import hashlib
 
-from openremap.tuning.manufacturers.siemens.simtec56.extractor import (
+from openremap.core.manufacturers.siemens.simtec56.extractor import (
     SiemensSimtec56Extractor,
 )
-from openremap.tuning.manufacturers.siemens.simtec56.patterns import (
+from openremap.core.manufacturers.siemens.simtec56.patterns import (
     DETECTION_SIGNATURES,
     EXCLUSION_SIGNATURES,
     IDENT_PREFIXES,

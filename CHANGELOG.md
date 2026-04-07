@@ -7,6 +7,59 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.4.3] — 2026-04-07
+
+Flat package layout, Python 3.10 minimum compatibility, README and docs refresh,
+TUI syntax fix, and test reliability fix.
+
+### Changed — Package Layout
+
+- **Flat package layout** — source tree moved from `src/openremap/` to `openremap/`
+  (standard flat layout). Build target in `pyproject.toml` updated accordingly
+  (`packages = ["openremap"]`). No public API changes.
+
+### Changed — Python Compatibility
+
+- **Minimum Python lowered from 3.14 to 3.10** — the codebase uses no Python 3.11+
+  features; the prior floor was unnecessarily restrictive. `pyproject.toml`
+  `requires-python` set to `>=3.10`; classifiers expanded to cover 3.10–3.14.
+- All documentation, badges, and install guides updated to reflect `>=3.10`:
+  `README.md`, `CONTRIBUTING.md`, `docs/install/developers.md`,
+  `docs/install/windows.md`, `docs/integration.md`, `docs/setup.md`.
+
+### Fixed — TUI (`openremap/tui/app.py`)
+
+- **Python 2-style multi-exception syntax** — 8 occurrences of `except A, B:`
+  replaced with the correct Python 3 form `except (A, B):`. This caused a
+  `SyntaxError` on any Python < 3.14 when the TUI module was imported.
+
+### Fixed — Test Suite (`tests/cli/test_cli_main.py`)
+
+- **`TestMainBlock::test_main_block_invokes_app` hanging** — the test exec'd
+  `cli/main.py` with `__name__ == "__main__"`. When pytest is invoked with no
+  extra arguments, `sys.argv` has length 1, causing `main()` to take the TUI
+  branch and hang indefinitely. Fixed by pinning `sys.argv` to
+  `["openremap", "--help"]` inside the test so the CLI branch is always exercised.
+
+### Changed — README
+
+- Rewrote introduction to emphasise the library-first design; added a Python code
+  example showing the public API (`identify_ecu`, `score_identity`, `ECUPatcher`).
+- Added `openremap.com` website link and integration guide cross-reference.
+- Updated all GitHub badge and link URLs from `Pinelo92/openremap` to
+  `Openremap/openremap-core`.
+
+### Changed — Documentation
+
+- CHANGELOG comparison links updated from `Pinelo92/openremap` to
+  `Openremap/openremap-core`.
+
+### Tests
+
+- 4,763 tests passing — all green on Python 3.10.
+
+---
+
 ## [0.4.2] — 2026-04-03
 
 EDC16 hardware-number extraction fix, evidence-based detection system,
@@ -601,6 +654,9 @@ Initial public release of the `openremap` core library.
 
 ---
 
-[0.4.0]: https://github.com/Pinelo92/openremap/compare/v0.3.1...v0.4.0
-[0.3.1]: https://github.com/Pinelo92/openremap/compare/v0.3.0...v0.3.1
-[0.3.0]: https://github.com/Pinelo92/openremap/releases/tag/v0.3.0
+[0.4.3]: https://github.com/Openremap/openremap-core/compare/v0.4.2...v0.4.3
+[0.4.2]: https://github.com/Openremap/openremap-core/compare/v0.4.1...v0.4.2
+[0.4.1]: https://github.com/Openremap/openremap-core/compare/v0.4.0...v0.4.1
+[0.4.0]: https://github.com/Openremap/openremap-core/compare/v0.3.1...v0.4.0
+[0.3.1]: https://github.com/Openremap/openremap-core/compare/v0.3.0...v0.3.1
+[0.3.0]: https://github.com/Openremap/openremap-core/releases/tag/v0.3.0

@@ -8,7 +8,7 @@ For contributors, extractor authors, and anyone who wants to run OpenRemap from 
 
 | Tool | Required version | Check |
 |---|---|---|
-| Python | 3.14+ | `python --version` |
+| Python | 3.10+ | `python --version` |
 | uv | latest | `uv --version` |
 | git | any | `git --version` |
 
@@ -35,8 +35,8 @@ Download from [git-scm.com](https://git-scm.com/downloads) or use your system pa
 ## Clone and set up
 
 ```bash
-git clone https://github.com/Pinelo92/openremap.git
-cd openremap
+git clone https://github.com/Openremap/openremap-core.git
+cd openremap-core
 uv sync
 ```
 
@@ -87,7 +87,7 @@ Run `deactivate` to leave the environment, or just close the terminal.
 ## Running the test suite
 
 ```bash
-uv run pytest core/tests/ -q
+uv run pytest tests/ -q
 ```
 
 All tests must pass before submitting a pull request. Expected output on a clean install:
@@ -99,7 +99,7 @@ All tests must pass before submitting a pull request. Expected output on a clean
 To run a specific test file:
 
 ```bash
-uv run pytest core/tests/tuning/manufacturers/test_edc17_extractor.py -v
+uv run pytest tests/tuning/manufacturers/test_edc17_extractor.py -v
 ```
 
 ---
@@ -107,18 +107,17 @@ uv run pytest core/tests/tuning/manufacturers/test_edc17_extractor.py -v
 ## Project structure
 
 ```
-openremap/
-├── core/
-│   ├── src/openremap/
-│   │   ├── cli/
-│   │   │   └── commands/       ← identify.py, scan.py, cook.py, etc.
-│   │   └── tuning/
-│   │       ├── manufacturers/
-│   │       │   └── bosch/      ← one sub-package per ECU family
-│   │       └── services/       ← identifier.py, confidence.py, patcher.py, etc.
-│   └── tests/
-│       └── tuning/
-│           └── manufacturers/  ← per-extractor test files
+openremap-core/
+├── src/openremap/
+│   ├── cli/
+│   │   └── commands/       ← identify.py, scan.py, cook.py, etc.
+│   └── tuning/
+│       ├── manufacturers/
+│       │   └── bosch/      ← one sub-package per ECU family
+│       └── services/       ← identifier.py, confidence.py, patcher.py, etc.
+├── tests/
+│   └── tuning/
+│       └── manufacturers/  ← per-extractor test files
 ├── pyproject.toml
 └── uv.lock
 ```
@@ -150,15 +149,14 @@ uv sync
 
 ## Publishing a release
 
-Releases are built and published from the `api/` workspace root (not from `core/` directly):
+Releases are built and published from the project root:
 
 ```bash
-cd api
 uv build
 uv publish
 ```
 
-Artifacts appear in `api/dist/`.
+Artifacts appear in `dist/`.
 
 ---
 

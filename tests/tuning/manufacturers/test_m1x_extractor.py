@@ -33,7 +33,7 @@ Covers:
 
 import hashlib
 
-from openremap.tuning.manufacturers.bosch.m1x.extractor import BoschM1xExtractor
+from openremap.core.manufacturers.bosch.m1x.extractor import BoschM1xExtractor
 
 EXTRACTOR = BoschM1xExtractor()
 

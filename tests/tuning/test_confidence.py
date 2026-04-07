@@ -25,7 +25,7 @@ Covers:
 
 import pytest
 
-from openremap.tuning.services.confidence import (
+from openremap.core.services.confidence import (
     ConfidenceResult,
     ConfidenceSignal,
     _family_expects_field,
@@ -33,7 +33,7 @@ from openremap.tuning.services.confidence import (
     _is_1037_family,
     score_identity,
 )
-from openremap.tuning.manufacturers.base import DetectionStrength
+from openremap.core.manufacturers.base import DetectionStrength
 
 
 # ---------------------------------------------------------------------------

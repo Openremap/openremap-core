@@ -35,7 +35,7 @@ Covers:
 
 import hashlib
 
-from openremap.tuning.manufacturers.bosch.edc17.extractor import BoschExtractor
+from openremap.core.manufacturers.bosch.edc17.extractor import BoschExtractor
 
 
 # ---------------------------------------------------------------------------
@@ -1247,7 +1247,7 @@ class TestCoverageBaseSearch:
         bad_match.group.side_effect = Exception("simulated group() error")
 
         with patch(
-            "openremap.tuning.manufacturers.base.re.finditer",
+            "openremap.core.manufacturers.base.re.finditer",
             return_value=iter([bad_match]),
         ):
             results = EXTRACTOR._search(b"anything", rb"\d+", slice(None))
@@ -1258,7 +1258,7 @@ class TestCoverageBaseSearch:
         from unittest.mock import patch
 
         with patch(
-            "openremap.tuning.manufacturers.base.re.finditer",
+            "openremap.core.manufacturers.base.re.finditer",
             side_effect=Exception("simulated finditer error"),
         ):
             results = EXTRACTOR._search(b"anything", rb"\d+", slice(None))

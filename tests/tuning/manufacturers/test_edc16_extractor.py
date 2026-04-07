@@ -31,8 +31,8 @@ import hashlib
 
 import pytest
 
-from openremap.tuning.manufacturers.bosch.edc16.extractor import BoschEDC16Extractor
-from openremap.tuning.manufacturers.bosch.edc16.patterns import (
+from openremap.core.manufacturers.bosch.edc16.extractor import BoschEDC16Extractor
+from openremap.core.manufacturers.bosch.edc16.patterns import (
     ACTIVE_STARTS_BY_SIZE,
     DETECTION_SIGNATURES,
     EDC16_HEADER_MAGIC,
@@ -1361,7 +1361,7 @@ class TestCoverageEdc16DetectEdges:
 
         data = bytearray(SIZE_256KB)
         with patch(
-            "openremap.tuning.manufacturers.bosch.edc16.extractor.re.search",
+            "openremap.core.manufacturers.bosch.edc16.extractor.re.search",
             return_value=mock_match,
         ):
             result = EXTRACTOR._read_sw_at(bytes(data), offset=0x10)
@@ -1377,7 +1377,7 @@ class TestCoverageEdc16DetectEdges:
 
         data = bytearray(SIZE_256KB)
         with patch(
-            "openremap.tuning.manufacturers.bosch.edc16.extractor.re.search",
+            "openremap.core.manufacturers.bosch.edc16.extractor.re.search",
             return_value=mock_match,
         ):
             result = EXTRACTOR._read_sw_at(bytes(data), offset=0x10)

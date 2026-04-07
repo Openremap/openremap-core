@@ -34,10 +34,10 @@ Covers:
 
 import hashlib
 
-from openremap.tuning.manufacturers.siemens.ppd.extractor import (
+from openremap.core.manufacturers.siemens.ppd.extractor import (
     SiemensPPDExtractor,
 )
-from openremap.tuning.manufacturers.siemens.ppd.patterns import (
+from openremap.core.manufacturers.siemens.ppd.patterns import (
     DETECTION_SIGNATURES,
     EXCLUSION_SIGNATURES,
     PATTERNS,
