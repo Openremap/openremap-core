@@ -103,6 +103,17 @@ def _print_summary(recipe: dict, output: Optional[Path]) -> None:
         ("Original", meta.get("original_file", "?")),
         ("Modified", meta.get("modified_file", "?")),
     ]
+
+    # --- Flagged instructions ---
+    flagged = sum(1 for inst in recipe.get("instructions", []) if inst.get("flags"))
+    if flagged:
+        rows.append(("⚠ Flagged", f"{flagged:,} instruction(s) need review"))
+
+    # --- Trust level ---
+    creator = recipe.get("creator", {})
+    trust = creator.get("trust_level", "UNSIGNED")
+    rows.append(("Trust Level", trust))
+
     for label, value in rows:
         typer.echo(f"  {label:<{col}} {value}")
 
@@ -192,6 +203,15 @@ def cook(
             context_size=context_size,
         )
         recipe = analyzer.build_recipe()
+    except ValueError as exc:
+        # Includes size-mismatch hard error from the pre-cook guard
+        typer.echo(
+            typer.style(
+                f"\n  Error: cook failed — {exc}", fg=typer.colors.RED, bold=True
+            ),
+            err=True,
+        )
+        raise typer.Exit(code=1)
     except Exception as exc:
         typer.echo(
             typer.style(
@@ -200,6 +220,42 @@ def cook(
             err=True,
         )
         raise typer.Exit(code=1)
+
+    # Surface any non-fatal warnings produced during recipe building
+    # (e.g. ECU identity mismatch between original and modified).
+    for warning in analyzer.cook_warnings():
+        typer.echo(
+            typer.style(
+                f"\n  ⚠  Warning: {warning}",
+                fg=typer.colors.YELLOW,
+                bold=True,
+            ),
+            err=True,
+        )
+
+    # Surface flagged instructions (VIN, checksum suspects, etc.)
+    flagged_instructions = [
+        inst for inst in recipe.get("instructions", []) if inst.get("flags")
+    ]
+    if flagged_instructions:
+        typer.echo(
+            typer.style(
+                f"\n  ⚠  {len(flagged_instructions)} instruction(s) flagged for review:",
+                fg=typer.colors.YELLOW,
+                bold=True,
+            ),
+            err=True,
+        )
+        for inst in flagged_instructions:
+            offset_hex = inst.get("offset_hex", f"{inst['offset']:X}")
+            for flag in inst.get("flags", []):
+                typer.echo(
+                    typer.style(
+                        f"     0x{offset_hex} — {flag['kind']} ({flag['confidence']}): {flag['reason']}",
+                        fg=typer.colors.YELLOW,
+                    ),
+                    err=True,
+                )
 
     indent = 2 if pretty else None
     json_content = json.dumps(recipe, indent=indent, ensure_ascii=False)

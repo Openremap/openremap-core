@@ -407,7 +407,7 @@ class TestCookEdgeCases:
         assert recipe["statistics"] == {}
 
     def test_cook_files_of_different_sizes(self, tmp_path):
-        """Cook handles files of different sizes."""
+        """Cook rejects files of different sizes with exit code 1."""
         original = tmp_path / "original.bin"
         modified = tmp_path / "modified.bin"
         output = tmp_path / "recipe.openremap"
@@ -419,11 +419,8 @@ class TestCookEdgeCases:
             app, ["cook", str(original), str(modified), "--output", str(output)]
         )
 
-        assert result.exit_code == 0, result.output
-        recipe = json.loads(output.read_text())
-        assert "metadata" in recipe
-        assert recipe["metadata"]["original_size"] == 1024
-        assert recipe["metadata"]["modified_size"] == 2048
+        assert result.exit_code == 1
+        assert not output.exists()
 
     def test_cook_many_changes_single_recipe(self, tmp_path):
         """Cook correctly handles recipes with many changes."""

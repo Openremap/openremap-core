@@ -2,6 +2,15 @@ from typing import List, Optional
 from pydantic import BaseModel, Field
 
 
+class InstructionFlagSchema(BaseModel):
+    """Annotation flag on a single instruction."""
+
+    kind: str = Field(..., description="Flag type: VIN_SUSPECT, CHECKSUM_SUSPECT, etc.")
+    reason: str = Field(..., description="Human-readable explanation")
+    confidence: str = Field(..., description="HIGH, MEDIUM, or LOW")
+    action: str = Field("REVIEW", description="Recommended action — always REVIEW")
+
+
 class SupportedFamilySchema(BaseModel):
     manufacturer: str
     family: str
@@ -26,6 +35,10 @@ class InstructionSchema(BaseModel):
     context_after: str
     context_size: int
     description: str
+    flags: List[InstructionFlagSchema] = Field(
+        default_factory=list,
+        description="Annotation flags for suspicious changes (VIN, checksum, etc.)",
+    )
 
 
 class ECUIdentitySchema(BaseModel):
@@ -61,6 +74,28 @@ class ECUIdentitySchema(BaseModel):
     sha256: str = Field(..., description="SHA-256 of the full binary file")
 
 
+class AuthorSchema(BaseModel):
+    """Recipe author identity."""
+
+    name: Optional[str] = None
+    handle: Optional[str] = None
+    id: Optional[str] = Field(None, description="Platform-assigned UUID")
+
+
+class CreatorSchema(BaseModel):
+    """Recipe provenance metadata."""
+
+    tool: str = Field(..., description="Tool that created the recipe")
+    tool_version: str = Field(..., description="Tool version")
+    created_at: str = Field(..., description="ISO 8601 UTC timestamp")
+    author: Optional[AuthorSchema] = None
+    signature: Optional[dict] = Field(None, description="Digital signature (future)")
+    trust_level: str = Field(
+        "UNSIGNED",
+        description="UNSIGNED | COMMUNITY | SIGNED | VERIFIED",
+    )
+
+
 class AnalysisMetadataSchema(BaseModel):
     original_file: str
     modified_file: str
@@ -88,6 +123,15 @@ class AnalyzerResponseSchema(BaseModel):
     and direct consumption by the patcher pipeline.
     """
 
+    openremap: Optional[dict] = Field(
+        None, description="Envelope with type and schema_version"
+    )
+    creator: Optional[CreatorSchema] = Field(
+        None, description="Recipe provenance metadata"
+    )
+    fingerprint: Optional[str] = Field(
+        None, description="SHA-256 fingerprint of instruction content"
+    )
     metadata: AnalysisMetadataSchema
     ecu: ECUIdentitySchema
     statistics: AnalysisStatisticsSchema

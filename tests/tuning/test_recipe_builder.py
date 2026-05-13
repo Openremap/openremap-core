@@ -438,6 +438,8 @@ class TestBuildRecipe:
         assert "ecu" in recipe
         assert "statistics" in recipe
         assert "instructions" in recipe
+        assert "creator" in recipe
+        assert "fingerprint" in recipe
 
     def test_format_version_is_4_1(self):
         a = make_analyzer(make_bin(256), make_bin(256))
@@ -449,7 +451,7 @@ class TestBuildRecipe:
         recipe = a.build_recipe()
         assert "openremap" in recipe
         assert recipe["openremap"]["type"] == "recipe"
-        assert recipe["openremap"]["schema_version"] == "4.0"
+        assert recipe["openremap"]["schema_version"] == "4.1"
 
     def test_original_and_modified_filenames_in_metadata(self):
         orig = make_bin(256)
@@ -476,6 +478,7 @@ class TestBuildRecipe:
             "context_after",
             "context_size",
             "description",
+            "flags",
         ):
             assert key in inst, f"Missing instruction key: {key}"
 

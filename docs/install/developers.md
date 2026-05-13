@@ -35,7 +35,7 @@ Download from [git-scm.com](https://git-scm.com/downloads) or use your system pa
 ## Clone and set up
 
 ```bash
-git clone https://github.com/Openremap/openremap-core.git
+git clone https://github.com/v-arapidis/openremap-core.git
 cd openremap-core
 uv sync
 ```

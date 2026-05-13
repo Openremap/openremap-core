@@ -516,9 +516,17 @@ class OrganizeFailed(Message):
 
 
 class CookDone(Message):
-    def __init__(self, recipe: dict, output_path: Optional[Path]) -> None:
+    def __init__(
+        self,
+        recipe: dict,
+        output_path: Optional[Path],
+        warnings: list,
+        flagged: list,
+    ) -> None:
         self.recipe = recipe
         self.output_path = output_path
+        self.warnings = warnings
+        self.flagged = flagged
         super().__init__()
 
 
@@ -1263,7 +1271,9 @@ class CookPanel(Vertical):
     @on(CookDone)
     def _handle_cook_done(self, message: CookDone) -> None:
         self.query_one("#btn-cook", Button).disabled = False
-        self._render_cook_result(message.recipe, message.output_path)
+        self._render_cook_result(
+            message.recipe, message.output_path, message.warnings, message.flagged
+        )
 
     @on(CookFailed)
     def _handle_cook_failed(self, message: CookFailed) -> None:
@@ -1373,15 +1383,21 @@ class CookPanel(Vertical):
                 modified_filename=modified.name,
             )
             recipe = analyzer.build_recipe()
+            warnings = analyzer.cook_warnings()
+            flagged = [
+                inst for inst in recipe.get("instructions", []) if inst.get("flags")
+            ]
             if output:
                 output.parent.mkdir(parents=True, exist_ok=True)
                 output.write_text(
                     json.dumps(recipe, indent=2, ensure_ascii=False),
                     encoding="utf-8",
                 )
-            self.post_message(CookDone(recipe, output))
+            self.post_message(CookDone(recipe, output, warnings, flagged))
         except OSError as exc:
             self.post_message(CookFailed(f"File read error: {exc}"))
+        except ValueError as exc:
+            self.post_message(CookFailed(str(exc)))
         except Exception as exc:
             self.post_message(CookFailed(str(exc)))
 
@@ -1423,14 +1439,30 @@ class CookPanel(Vertical):
         )
         self._do_cook(orig, mod, out)
 
-    def _render_cook_result(self, recipe: dict, output_path: Optional[Path]) -> None:
+    def _render_cook_result(
+        self,
+        recipe: dict,
+        output_path: Optional[Path],
+        warnings: list,
+        flagged: list,
+    ) -> None:
         ecu = recipe.get("ecu", {})
         stats = recipe.get("statistics", {})
         meta = recipe.get("metadata", {})
+        creator = recipe.get("creator", {})
+        fingerprint = recipe.get("fingerprint", "")
         W = 22
 
         t = Text()
         t.append("\n  ✅  Recipe built successfully\n\n", style="bold green")
+
+        trust = creator.get("trust_level", "UNSIGNED")
+        trust_style = {
+            "UNSIGNED": "yellow",
+            "COMMUNITY": "#0ea5e9",
+            "SIGNED": "green",
+            "VERIFIED": "bold green",
+        }.get(trust, "dim")
 
         rows = [
             ("ECU", f"{ecu.get('manufacturer', '?')}  ·  {ecu.get('ecu_family', '?')}"),
@@ -1445,6 +1477,21 @@ class CookPanel(Vertical):
             t.append(f"  {label:<{W}}", style="dim")
             t.append(f"{value}\n", style="#c8d1e0")
 
+        # Trust level (colour-coded)
+        t.append(f"  {'Trust Level':<{W}}", style="dim")
+        t.append(f"{trust}\n", style=trust_style)
+
+        # Flagged count (if any)
+        if flagged:
+            t.append(f"  {'⚠ Flagged':<{W}}", style="dim")
+            t.append(f"{len(flagged):,} instruction(s) need review\n", style="yellow")
+
+        # Fingerprint (truncated for readability)
+        if fingerprint:
+            short_fp = fingerprint[len("sha256:") : len("sha256:") + 16] + "…"
+            t.append(f"  {'Fingerprint':<{W}}", style="dim")
+            t.append(f"sha256:{short_fp}\n", style="dim #c8d1e0")
+
         t.append("\n")
         if output_path:
             t.append(f"  Recipe saved to  ", style="dim")
@@ -1454,6 +1501,24 @@ class CookPanel(Vertical):
                 "  No output path set — recipe was not saved to disk.\n",
                 style="yellow",
             )
+
+        # Cook warnings (ECU identity mismatch, etc.)
+        for warning in warnings:
+            t.append(f"\n  ⚠  Warning: {warning}\n", style="bold yellow")
+
+        # Flagged instruction details
+        if flagged:
+            t.append(
+                f"\n  ⚠  {len(flagged)} instruction(s) flagged for review:\n",
+                style="bold yellow",
+            )
+            for inst in flagged:
+                offset_hex = inst.get("offset_hex", f"{inst['offset']:X}")
+                for flag in inst.get("flags", []):
+                    t.append(
+                        f"     0x{offset_hex} — {flag['kind']} ({flag['confidence']}): {flag['reason']}\n",
+                        style="yellow",
+                    )
 
         t.append(
             "\n  ⚠  Remember to correct checksums before flashing.\n",
@@ -2363,7 +2428,7 @@ class AboutPanel(Vertical):
         t.append("  ─" * 26 + "\n\n", style="dim")
         t.append("  Links\n\n", style="bold #c8d1e0")
         t.append(f"  {'GitHub':<24}", style="dim")
-        t.append("https://github.com/Openremap/openremap-core\n", style="bold #0ea5e9")
+        t.append("https://github.com/v-arapidis/openremap-core\n", style="bold #0ea5e9")
         t.append(f"  {'PyPI':<24}", style="dim")
         t.append("pip install openremap\n\n", style="bold #0ea5e9")
 

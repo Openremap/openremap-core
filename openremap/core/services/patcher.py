@@ -57,6 +57,7 @@ class PatchResult:
     size: int
     shift: Optional[int]  # offset_found - offset_expected (0 = exact)
     message: str
+    ambiguous: bool = False  # True when >1 ctx+ob match found in window
 
 
 # ---------------------------------------------------------------------------
@@ -170,14 +171,15 @@ class ECUPatcher:
     # Search — ctx+ob anchor within ±EXACT_WINDOW
     # ------------------------------------------------------------------
 
-    def _find(self, ctx: bytes, ob: bytes, expected: int) -> int:
+    def _find(self, ctx: bytes, ob: bytes, expected: int) -> tuple[int, int]:
         """
         Search for the atomic pattern ``ctx + ob`` inside a ±EXACT_WINDOW
         slice of the frozen snapshot.
 
-        Returns the absolute offset where ``ob`` starts (i.e. the write
-        target), or -1 when nothing is found.  When multiple hits exist the
-        one closest to ``expected`` is returned.
+        Returns ``(absolute_offset_of_ob_start, match_count)``.
+        ``offset`` is -1 and ``match_count`` is 0 when nothing is found.
+        When multiple hits exist the one closest to ``expected`` is returned;
+        ``match_count > 1`` signals ambiguity to the caller.
         """
         anchor = ctx + ob
         ctx_len = len(ctx)
@@ -197,9 +199,9 @@ class ECUPatcher:
             pos = p + 1
 
         if not matches:
-            return -1
+            return -1, 0
 
-        return min(matches, key=lambda o: abs(o - expected))
+        return min(matches, key=lambda o: abs(o - expected)), len(matches)
 
     # ------------------------------------------------------------------
     # Single instruction
@@ -220,8 +222,9 @@ class ECUPatcher:
         if not ctx:
             found_ob = self._snapshot[expected : expected + size]
             offset = expected if found_ob == ob else -1
+            match_count = 1 if offset != -1 else 0
         else:
-            offset = self._find(ctx, ob, expected)
+            offset, match_count = self._find(ctx, ob, expected)
 
         if offset == -1:
             return PatchResult(
@@ -238,9 +241,17 @@ class ECUPatcher:
             )
 
         shift = offset - expected
+        ambiguous = match_count > 1
 
         # Write modified bytes to the mutable buffer (NOT the snapshot)
         self._buffer[offset : offset + size] = mb
+
+        msg = f"Applied at 0x{offset:X} ({'exact' if shift == 0 else f'shift={shift:+d}'})."
+        if ambiguous:
+            msg += (
+                f" WARNING: {match_count} ctx+ob matches found in window — "
+                "closest chosen. Verify recipe ctx is sufficiently unique."
+            )
 
         return PatchResult(
             index=idx,
@@ -249,8 +260,52 @@ class ECUPatcher:
             offset_found=offset,
             size=size,
             shift=shift,
-            message=f"Applied at 0x{offset:X} ({'exact' if shift == 0 else f'shift={shift:+d}'}).",
+            ambiguous=ambiguous,
+            message=msg,
         )
+
+    # ------------------------------------------------------------------
+    # Main entry point
+    # ------------------------------------------------------------------
+
+    # ------------------------------------------------------------------
+    # Overlap detection
+    # ------------------------------------------------------------------
+
+    def _find_overlapping_instructions(
+        self, instructions: List[Dict[str, Any]]
+    ) -> List[str]:
+        """
+        Check every pair of instructions for overlapping write regions.
+
+        Two instructions overlap when their byte ranges intersect — i.e. at
+        least one byte would be written by both.  This is always a recipe
+        error: the later instruction would silently overwrite the earlier
+        one's bytes, producing a result that neither instruction intended.
+
+        Returns:
+            A list of human-readable error strings, one per overlapping pair.
+            An empty list means no overlaps — safe to proceed.
+        """
+        regions: List[tuple[int, int, int]] = []  # (1-based idx, start, end_inclusive)
+        for idx, inst in enumerate(instructions, 1):
+            start = inst["offset"]
+            size = len(bytes.fromhex(inst["ob"]))
+            regions.append((idx, start, start + size - 1))
+
+        errors: List[str] = []
+        for i in range(len(regions)):
+            idx_a, start_a, end_a = regions[i]
+            for j in range(i + 1, len(regions)):
+                idx_b, start_b, end_b = regions[j]
+                if start_a <= end_b and start_b <= end_a:
+                    errors.append(
+                        f"Instructions #{idx_a} (0x{start_a:X}–0x{end_a:X}) and "
+                        f"#{idx_b} (0x{start_b:X}–0x{end_b:X}) have overlapping "
+                        "write regions — the later write would silently corrupt "
+                        "the earlier one."
+                    )
+        return errors
 
     # ------------------------------------------------------------------
     # Main entry point
@@ -261,17 +316,20 @@ class ECUPatcher:
         Run the full patch pipeline:
 
         1. Strict pre-flight validation (unless ``skip_validation=True``).
-        2. Apply every instruction from the recipe to the in-memory buffer.
-        3. If every instruction succeeded, return the patched bytes.
-        4. If any instruction failed, raise ``ValueError`` with a summary —
+        2. Overlapping-write detection — raises immediately if any two
+           instructions share byte ranges.
+        3. Apply every instruction from the recipe to the in-memory buffer.
+        4. If every instruction succeeded, return the patched bytes.
+        5. If any instruction failed, raise ``ValueError`` with a summary —
            the partially-modified buffer is discarded.
 
         Returns:
             The fully patched binary as ``bytes``.
 
         Raises:
-            ValueError: if strict validation fails OR if any instruction
-                        could not be applied.
+            ValueError: if strict validation fails, if overlapping write
+                        regions are detected, or if any instruction could
+                        not be applied.
         """
         self.results.clear()
 
@@ -279,13 +337,22 @@ class ECUPatcher:
         if not self.skip_validation:
             self._run_strict_validation()
 
-        # --- 2. Apply instructions ---
+        # --- 2. Overlapping-write detection ---
         instructions = self.recipe.get("instructions", [])
+        overlaps = self._find_overlapping_instructions(instructions)
+        if overlaps:
+            detail = "\n".join(f"  {e}" for e in overlaps)
+            raise ValueError(
+                f"{len(overlaps)} overlapping instruction pair(s) detected — "
+                f"this recipe would corrupt itself:\n{detail}"
+            )
+
+        # --- 3. Apply instructions ---
         for idx, inst in enumerate(instructions, 1):
             result = self._apply_instruction(idx, inst)
             self.results.append(result)
 
-        # --- 3. Check for failures ---
+        # --- 4. Check for failures ---
         failed_results = [r for r in self.results if r.status == PatchStatus.FAILED]
         if failed_results:
             lines = [
@@ -297,7 +364,7 @@ class ECUPatcher:
                 + "\n".join(lines)
             )
 
-        # --- 4. Return patched bytes ---
+        # --- 5. Return patched bytes ---
         return bytes(self._buffer)
 
     # ------------------------------------------------------------------
@@ -309,6 +376,10 @@ class ECUPatcher:
         total = len(self.results)
         success = sum(1 for r in self.results if r.status == PatchStatus.SUCCESS)
         return total, success, total - success
+
+    def ambiguous_count(self) -> int:
+        """Return the number of instructions that matched ambiguously (>1 ctx+ob hit in window)."""
+        return sum(1 for r in self.results if r.ambiguous)
 
     # ------------------------------------------------------------------
     # Serialisation
@@ -326,6 +397,7 @@ class ECUPatcher:
         """
         total, success, failed = self.score()
         shifted = sum(1 for r in self.results if r.shift is not None and r.shift != 0)
+        ambiguous = self.ambiguous_count()
 
         def _serialise(r: PatchResult) -> Dict[str, Any]:
             d = asdict(r)
@@ -341,6 +413,7 @@ class ECUPatcher:
             "success": success,
             "failed": failed,
             "shifted": shifted,
+            "ambiguous": ambiguous,
             "score_pct": round(success / total * 100, 2) if total else 0.0,
             "patch_applied": failed == 0,
         }

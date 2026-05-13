@@ -10,7 +10,7 @@ package = true
 
 [project]
 name = "openremap"
-version = "0.4.3"
+version = "0.4.4"
 description = "ECU binary analysis and patching toolkit — diff, validate, and apply tuning recipes to automotive ECU binaries."
 readme = "README.md"
 license = { file = "LICENSE" }
@@ -47,9 +47,9 @@ openremap-tui = "openremap.tui.main:run"
 [project.urls]
 Homepage = "https://www.openremap.com"
 Documentation = "https://www.openremap.com/docs"
-Repository = "https://github.com/Openremap/openremap-core"
-"Bug Tracker" = "https://github.com/Openremap/openremap-core/issues"
-Changelog = "https://github.com/Openremap/openremap-core/blob/main/CHANGELOG.md"
+Repository = "https://github.com/v-arapidis/openremap-core"
+"Bug Tracker" = "https://github.com/v-arapidis/openremap-core/issues"
+Changelog = "https://github.com/v-arapidis/openremap-core/blob/main/CHANGELOG.md"
 
 [dependency-groups]
 dev = [

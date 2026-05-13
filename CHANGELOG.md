@@ -7,6 +7,149 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.4.4] — 2026-05-14
+
+Recipe safety guards, instruction annotation (VIN detection), patcher collision
+safety, recipe provenance & fingerprinting, and full CLI/TUI surfacing of all
+new signals. Repository moved to `v-arapidis/openremap-core`.
+
+### Added — Recipe Safety Guards (`openremap/core/services/recipe_builder.py`)
+
+- **Size match guard (hard error)** — `build_recipe()` now raises `ValueError`
+  immediately if the original and modified binaries are not the same size. No
+  diff is run and no recipe is produced. ECU flash images are fixed-size; a
+  mismatch almost always means two different ECU models or a corrupted file.
+- **Identity match guard (warning, not fatal)** — both binaries are identified
+  independently after the size check. If their `match_key` values differ a
+  human-readable warning is recorded (accessible via `cook_warnings()`) and
+  embedded in `recipe["ecu"]["cook_warnings"]`. The recipe is still built so
+  legitimate edge-cases (unknown / anonymised bins) are not blocked.
+- **`cook_warnings()` method** — returns the list of non-fatal warnings produced
+  during the last `build_recipe()` call. Always returns a fresh copy; safe to
+  call multiple times.
+- **`check_size_match()` / `check_identity_match()`** — public guard methods
+  exposed individually for programmatic use.
+
+### Added — Recipe Provenance & Fingerprinting (`openremap/core/services/recipe_builder.py`, `openremap/core/schemas/analyzer.py`)
+
+- **`creator` block** — every recipe now embeds a `creator` dict containing:
+  `tool` (`"openremap-core"`), `tool_version`, `created_at` (ISO 8601 UTC),
+  optional `author` sub-object, `signature` (reserved, currently `null`), and
+  a derived `trust_level`.
+- **`trust_level`** — four-tier provenance signal: `UNSIGNED` (no author info),
+  `COMMUNITY` (author present, no signature), `SIGNED` (author + signature,
+  future), `VERIFIED` (signed + platform-verified identity, future).
+- **`fingerprint`** — deterministic `sha256:…` hash of the instruction content
+  (`offset + ob + mb` tuples, sorted). Same tune always produces the same
+  fingerprint regardless of metadata. Useful for deduplication and accidental
+  corruption detection.
+- **Schema version bumped from `4.0` → `4.1`** to reflect the new top-level
+  fields (`creator`, `fingerprint`, `openremap` envelope) and the `flags` list
+  on each instruction.
+- **New Pydantic schemas** — `InstructionFlagSchema`, `AuthorSchema`,
+  `CreatorSchema` added to `openremap/core/schemas/analyzer.py`.
+  `AnalyzerResponseSchema` extended with `openremap`, `creator`, `fingerprint`.
+
+### Added — Instruction Annotation / VIN Detection (`openremap/core/services/annotator.py`)
+
+- **New module `annotator.py`** — pluggable instruction annotation system that
+  attaches non-destructive flags to suspicious instructions after diffing.
+  Nothing is removed; the user decides what to do with flagged instructions.
+- **`InstructionFlag`** — frozen dataclass with `kind`, `reason`, `confidence`
+  (`HIGH | MEDIUM | LOW`), and `action` (always `"REVIEW"`).
+- **`VINScanner`** — detects instructions that overlap with an ISO 3779
+  VIN-shaped byte sequence (`[A-HJ-NPR-Z0-9]{17}`) in the original binary.
+  Uses a ±24-byte margin around the instruction to catch partial overlaps.
+  Emits a single `VIN_SUSPECT` flag per instruction (confidence `HIGH`).
+- **`RecipeAnnotator`** — runs all registered scanners over every instruction
+  and attaches a `flags` list (empty list when clean). Pluggable via
+  `add_scanner()`. Helpers: `flagged_count()`, `flag_summary()`.
+- **Annotator wired into `build_recipe()`** — `RecipeAnnotator` runs
+  automatically at the end of every cook; every instruction in the produced
+  recipe contains a `flags` key.
+
+### Improved — Patcher Collision Safety (`openremap/core/services/patcher.py`)
+
+- **Overlapping write detection** — `apply_all()` now calls
+  `_find_overlapping_instructions()` before writing a single byte. If any two
+  instructions share overlapping byte ranges, `ValueError` is raised with a
+  detailed report listing every conflicting pair. The buffer is never touched.
+- **Ambiguous match detection** — `_find()` now returns
+  `(absolute_offset, match_count)`. When `match_count > 1`, the result is
+  flagged as `PatchResult.ambiguous = True` and a warning is appended to
+  `PatchResult.message`.
+- **`ambiguous_count()`** — new helper that counts ambiguous results after
+  `apply_all()`.
+- **`summarise()` extended** — the summary dict now includes an `"ambiguous"`
+  key alongside `success`, `failed`, and `shifted`.
+
+### Improved — CLI (`openremap/cli/commands/cook.py`)
+
+- **`ValueError` caught explicitly** — the size-mismatch hard error is now
+  caught as `ValueError` (before the generic `Exception` handler) and printed
+  as a red error message; exits with code 1 without creating an output file.
+- **Cook warnings surfaced** — `analyzer.cook_warnings()` is iterated after a
+  successful cook; each warning is printed in bold yellow to stderr.
+- **Flagged instructions listed** — if any instructions carry flags, a yellow
+  banner is printed to stderr followed by a per-instruction breakdown:
+  `0xOFFSET — KIND (CONFIDENCE): reason`.
+- **Summary table extended** — `_print_summary()` now shows `⚠ Flagged` (count
+  of flagged instructions, only when >0) and `Trust Level` rows.
+
+### Improved — TUI (`openremap/tui/app.py`)
+
+- **`CookDone` message extended** — carries `warnings: list` and `flagged: list`
+  alongside `recipe` and `output_path`.
+- **`_do_cook` updated** — collects `analyzer.cook_warnings()` and the flagged
+  instruction list after a successful cook and passes them to `CookDone`.
+  `ValueError` (size mismatch) is now caught explicitly.
+- **`_render_cook_result` extended** — the result panel now shows:
+  - **Trust Level** — colour-coded: yellow = `UNSIGNED`, blue = `COMMUNITY`,
+    green = `SIGNED`, bold green = `VERIFIED`.
+  - **⚠ Flagged** — count row, only shown when >0 flagged instructions.
+  - **Fingerprint** — truncated to `sha256:xxxxxxxxxxxxxxxx…` for readability.
+  - **Cook warnings** — each warning printed in bold yellow below the save path.
+  - **Flagged instruction details** — per-instruction breakdown in yellow with
+    offset, kind, confidence, and reason.
+
+### Changed — Repository URL
+
+- All GitHub URLs updated from `github.com/Openremap/openremap-core` to
+  `github.com/v-arapidis/openremap-core` across `README.md`, `pyproject.toml`,
+  `CHANGELOG.md`, `docs/install/developers.md`, and `openremap/tui/app.py`.
+- Codecov badge URL updated to `codecov.io/gh/v-arapidis/openremap-core`.
+
+### Fixed
+
+- **`__version__` out of sync** — `openremap/__init__.py` was still on `0.4.2`
+  while `pyproject.toml` was `0.4.3`. Both are now `0.4.4`.
+
+### Tests
+
+- **`tests/tuning/test_annotator.py`** (new) — full suite for `InstructionFlag`,
+  `VINScanner` (detection, no false positives, partial overlaps, adjacent
+  boundary, lowercase non-match, single-flag-per-instruction), and
+  `RecipeAnnotator` (flags on all instructions, `flagged_count`, `flag_summary`,
+  `add_scanner`, empty list, in-place return, flag dict serialisation).
+- **`tests/tuning/test_patcher_collision_safety.py`** (new) — exhaustive
+  collision-safety suite: duplicate `ob` outside/inside `±EXACT_WINDOW`, same
+  `ob` with different `ctx`, empty-ctx exact-offset fallback, realistic engine
+  vs ABS simulation, overlapping instruction detection, adjacent writes,
+  snapshot isolation, ambiguous match flagging, existence validator, collateral
+  damage checks, overlap edge cases.
+- **`tests/tuning/test_recipe_creation_safety.py`** (new) — safety guard suite:
+  size mismatch (all edge cases), identity mismatch (mocked `identify_ecu`),
+  `cook_warnings()` API (populated, embedded, cleared between calls, returns
+  copy), raw diff scope (VIN, checksum, IMMO bytes all captured — documents
+  intentional behaviour).
+- **`tests/cli/test_cli_cook.py`** — `test_cook_files_of_different_sizes`
+  updated: now expects `exit_code == 1` and no output file (previously expected
+  success with mismatched-size metadata).
+- **`tests/tuning/test_recipe_builder.py`** — assertions added for `creator`,
+  `fingerprint`, `flags` key on instructions, and schema version `4.1`.
+
+---
+
 ## [0.4.3] — 2026-04-07
 
 Flat package layout, Python 3.10 minimum compatibility, README and docs refresh,
@@ -654,9 +797,10 @@ Initial public release of the `openremap` core library.
 
 ---
 
-[0.4.3]: https://github.com/Openremap/openremap-core/compare/v0.4.2...v0.4.3
-[0.4.2]: https://github.com/Openremap/openremap-core/compare/v0.4.1...v0.4.2
-[0.4.1]: https://github.com/Openremap/openremap-core/compare/v0.4.0...v0.4.1
-[0.4.0]: https://github.com/Openremap/openremap-core/compare/v0.3.1...v0.4.0
-[0.3.1]: https://github.com/Openremap/openremap-core/compare/v0.3.0...v0.3.1
-[0.3.0]: https://github.com/Openremap/openremap-core/releases/tag/v0.3.0
+[0.4.4]: https://github.com/v-arapidis/openremap-core/compare/v0.4.3...v0.4.4
+[0.4.3]: https://github.com/v-arapidis/openremap-core/compare/v0.4.2...v0.4.3
+[0.4.2]: https://github.com/v-arapidis/openremap-core/compare/v0.4.1...v0.4.2
+[0.4.1]: https://github.com/v-arapidis/openremap-core/compare/v0.4.0...v0.4.1
+[0.4.0]: https://github.com/v-arapidis/openremap-core/compare/v0.3.1...v0.4.0
+[0.3.1]: https://github.com/v-arapidis/openremap-core/compare/v0.3.0...v0.3.1
+[0.3.0]: https://github.com/v-arapidis/openremap-core/releases/tag/v0.3.0

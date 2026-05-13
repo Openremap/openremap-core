@@ -23,6 +23,8 @@ coverage.xml
 .env
 .env.*
 plugins/
+changes/
+todo/
 
 # ── Logs ─────────────────────────────────────────────────────────────────────
 logs/

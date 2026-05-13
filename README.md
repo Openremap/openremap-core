@@ -1,7 +1,7 @@
 # OpenRemap
 
-[![CI](https://github.com/Openremap/openremap-core/actions/workflows/ci.yml/badge.svg)](https://github.com/Openremap/openremap-core/actions/workflows/ci.yml)
-[![Coverage](https://codecov.io/gh/Openremap/openremap-core/branch/main/graph/badge.svg)](https://codecov.io/gh/Openremap/openremap-core)
+[![CI](https://github.com/v-arapidis/openremap-core/actions/workflows/ci.yml/badge.svg)](https://github.com/v-arapidis/openremap-core/actions/workflows/ci.yml)
+[![Coverage](https://codecov.io/gh/v-arapidis/openremap-core/branch/main/graph/badge.svg)](https://codecov.io/gh/v-arapidis/openremap-core)
 [![PyPI](https://img.shields.io/pypi/v/openremap.svg)](https://pypi.org/project/openremap/)
 [![Changelog](https://img.shields.io/badge/-Changelog-blue.svg)](CHANGELOG.md)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
